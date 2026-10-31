@@ -1,0 +1,73 @@
+/* 관리자 화면 전용 */
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+.stat{background:var(--card);border-radius:18px;box-shadow:var(--sh1);padding:14px 14px;text-align:left;transition:transform .12s}
+.stat:active{transform:scale(.97)}
+.stat small{display:block;color:var(--sub);font-size:13px;font-weight:600}
+.stat b{display:block;font-family:var(--display);font-weight:400;font-size:30px;line-height:1.2;margin-top:2px;font-variant-numeric:tabular-nums}
+.stat.hot b{color:var(--bad)}
+.stat.on{box-shadow:0 0 0 2px var(--green),var(--sh1)}
+.tabs{display:flex;gap:6px;margin:20px 0 4px;overflow-x:auto;scrollbar-width:none}
+.tabs button{height:38px;padding:0 14px;border-radius:12px;font-size:15px;font-weight:600;color:var(--sub);white-space:nowrap}
+.tabs button.on{background:var(--ink);color:#fff}
+.rc{background:var(--card);border-radius:18px;box-shadow:var(--sh1);padding:16px 16px 14px;margin-top:10px}
+.rc .who{font-size:14px;color:var(--sub);margin-top:4px;font-variant-numeric:tabular-nums}
+.rc .who a{color:var(--sub);text-decoration:none;border-bottom:1px solid var(--line)}
+.rc .acts{display:flex;gap:8px;margin-top:12px}
+.rc .acts .btn{flex:1;width:auto;height:44px;font-size:15px;border-radius:12px}
+.rc .photos .ph{display:grid;place-items:center}
+.rc .photos .empty{padding:0;font-size:13px;color:var(--green-deep);text-decoration:underline}
+.pin{text-align:center;letter-spacing:.5em;font-size:24px!important;font-weight:700}
+.seg .chip{vertical-align:1px}
+.poster{background:#F5FBFF;color:#213536;border-radius:18px;padding:28px 22px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px}
+.poster h2{font-family:var(--display);font-weight:400;font-size:34px;margin:6px 0 0}
+.poster p{margin:0;color:#5B7071;font-size:15px}
+.poster .qr{background:#fff;padding:14px;border-radius:16px;margin:16px 0 10px;box-shadow:4px 4px 0 #96B8B6,8px 8px 0 #668485}
+.poster .qr img,.poster .qr canvas{display:block;width:220px!important;height:220px!important}
+.poster .steps{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:10px}
+.poster .steps span{background:#E2EFEE;color:#4E6869;border-radius:10px;padding:6px 10px;font-size:13px;font-weight:700}
+.url{word-break:break-all;font-size:13px;color:var(--sub);margin:12px 2px 0}
+@media print{
+  body *{visibility:hidden}
+  .poster,.poster *{visibility:visible}
+  .poster{position:fixed;left:0;top:0;width:100%;box-shadow:none;border-radius:0;padding:60px 40px}
+  .poster .qr img,.poster .qr canvas{width:320px!important;height:320px!important}
+  .poster h2{font-size:52px}.poster p{font-size:20px}.poster .steps span{font-size:18px}
+}
+.banline{display:flex;justify-content:flex-end;margin-top:10px}
+.banline .btn.sm{height:36px;font-size:14px}
+/* V4: 물품 신고 */
+.quote{margin-top:10px;background:var(--card2);border-radius:12px;padding:10px 12px;font-size:14px;line-height:1.55;white-space:pre-wrap}
+.prev{margin-top:10px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.prev small{font-size:12px;color:var(--faint);font-weight:700}
+.prev b{font-size:15px}
+.prev span{font-size:13px;color:var(--sub)}
+.prev .chip{align-self:flex-start}
+.who.warnline{color:var(--bad);font-weight:700}
+.pane-in{animation:paneIn .3s cubic-bezier(.2,.8,.2,1) backwards}
+@keyframes paneIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* ── V5 ── */
+.stats.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.stats.two .stat{padding:16px 18px}
+.stats.two .stat b{font-size:34px}
+.memo-btn{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 10px;border-radius:9px;font-size:13px;font-weight:700;color:var(--green-deep);background:var(--card);box-shadow:inset 0 0 0 1px var(--line);flex:none}
+.memo-btn svg{width:15px;height:15px}
+.memo-btn:active{background:var(--mint-soft)}
+.memo-btn.icon{width:34px;padding:0;justify-content:center}
+.rc>.row .chip{flex:none}
+.rc>.row{gap:8px}
+.memo-last{display:flex;gap:6px;align-items:flex-start;margin-top:8px;font-size:13px;color:var(--green-deep);background:var(--mint-soft);border-radius:10px;padding:7px 10px}
+.memo-last svg{width:14px;height:14px;flex:none;margin-top:3px}
+.memo-list{list-style:none;margin:12px 0 0;padding:0;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line);overflow:hidden}
+.memo-list li{padding:9px 12px;font-size:14px;line-height:1.5}
+.memo-list li+li{border-top:1px solid var(--line)}
+.memo-list li:first-child{background:var(--mint-soft);font-weight:600}
+.late-chip{height:22px;font-size:11.5px;margin-left:4px;vertical-align:1px}
+.rc .acts3 .btn{font-size:14px;padding:0 6px}
+.btn.danger.strong{background:var(--bad);color:#fff}
+.bad-t{color:var(--bad)}
+.sg-acts{display:flex;align-items:center;gap:12px;margin-top:10px}
+.sg-who{font-size:12.5px;color:var(--faint);min-width:0}
+.sg-acts .linkish{margin:0;color:var(--sub);white-space:nowrap}
+.sg-acts .btn.sm{flex:none}
+.rc.leaving,.sg.leaving{overflow:hidden;opacity:0;margin-top:0;padding-top:0;padding-bottom:0;transition:height .24s ease,opacity .18s ease,margin .24s ease,padding .24s ease}
+a.icon-btn{color:var(--ink)}

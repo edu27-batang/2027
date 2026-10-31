@@ -1,0 +1,1202 @@
+/* 바탕화면 학우 화면 (V5): 로그인 · 홈 · 물품대여 · 강의실 예약 · 건의 · 혜택
+ * 원칙: 화면을 넘길 때 서버를 기다리지 않는다. 이미 받은 정보로 먼저 그리고, 새 정보는 뒤에서 받아 조용히 바꾼다. */
+var APP = '바탕화면';
+var ORG = store.get('org') || "교육학과 제45대 학생회 '바탕'";
+var S = {
+  home: store.get('home'), // 마지막으로 받은 홈 정보(내 대여·예약 포함) — 앱을 열자마자 그린다
+  // 물품 대여
+  mut: 0, homeAt: 0, homeMut: -1, renting: false, // mut: 빌리기·반납·예약처럼 서버 기록을 바꿀 때마다 1씩 올린다(그 전에 출발한 응답은 버린다)
+  cat: null, catAt: 0, tab: '전공서적', q: '', picked: [], sel: [], result: null, reports: {},
+  // 강의실
+  room: null, group: null, month: null, day: null, range: null, roomMine: null, roomTarget: null, photos: [], roomResult: null,
+  // 건의
+  sgCat: null, sgText: '', anon: true, sgResult: null,
+  links: null,
+  me: store.get('user') || { studentId: '', name: '', phone: '', email: '', member: false },
+  token: loadToken(),
+  resetTok: null, forgotMail: ''
+};
+
+/* ── 로그인 토큰: '로그인 상태 유지'면 localStorage, 아니면 이 탭에서만(sessionStorage) ── */
+function loadToken() {
+  try { return localStorage.getItem('bth_token') || sessionStorage.getItem('bth_token') || ''; } catch (e) { return ''; }
+}
+function saveLogin(token, user, keep) {
+  S.token = token; S.me = user;
+  try {
+    localStorage.removeItem('bth_token'); sessionStorage.removeItem('bth_token');
+    (keep ? localStorage : sessionStorage).setItem('bth_token', token);
+  } catch (e) { }
+  store.set('user', user);
+}
+function clearLogin() {
+  S.token = ''; S.me = { studentId: '', name: '', phone: '', email: '', member: false };
+  try { ['bth_token', 'bth_user', 'bth_home'].forEach(function (k) { localStorage.removeItem(k); }); sessionStorage.removeItem('bth_token'); } catch (e) { }
+  S.home = null; S.cat = null; S.catAt = 0; S.roomMine = null;
+}
+/* 서버 호출에 토큰을 붙이고, 로그인이 풀렸으면 로그인 화면으로 */
+var rawCall = call;
+call = function (name, payload) {
+  var p = Object.assign({}, payload || {});
+  if (S.token && !p.token && p.anonymous !== true) p.token = S.token;
+  return rawCall(name, p).catch(function (e) {
+    if (e && e.auth && S.token) { clearLogin(); stack = []; go('login'); toast('다시 로그인해 주세요'); }
+    throw e;
+  });
+};
+
+/* ───────── 화면 이동 ───────── */
+var AUTH_VIEWS = { intro: 1, login: 1, signup: 1, forgot: 1, forgotSent: 1, reset: 1, resetDone: 1 };
+var stack = [];
+var poll = null;
+var navBack = false, noGhost = false; // 뒤로 갈 때는 반대 방향으로 미끄러지게
+function go(view, push) {
+  if (push !== false) stack.push(view);
+  while (closeTopOverlay()) { /* 열린 창은 모두 닫는다 */ }
+  if (poll) { clearInterval(poll); poll = null; }
+  if (!AUTH_VIEWS[view] && !S.token) { stack = ['login']; view = 'login'; }
+  if (view === 'rent' && !S.me.member) { stack = ['home']; view = 'home'; }
+  var back = navBack; navBack = false;
+  if (noGhost) noGhost = false; else ghostOut($('#app'), back);
+  $('#app').innerHTML = '<div class="fade' + (back ? ' back' : '') + '">' + VIEWS[view]() + '</div>';
+  window.scrollTo(0, 0);
+  document.body.classList.toggle('authed', !AUTH_VIEWS[view]);
+  syncFab();
+  if (AFTER[view]) AFTER[view]();
+}
+/* 화면 위 화살표 */
+function back() {
+  if (stack.length <= 1) return sysBack();
+  stack.pop(); navBack = true; go(stack.pop() || 'home');
+  return true;
+}
+/* 휴대폰 '뒤로'. 첫 화면이면 false(한 번 더 누르면 나간다) */
+function sysBack() {
+  if (stack.length > 1) return back();
+  var v = stack[0];
+  if (S.token && v !== 'home') { navBack = true; home(); return true; }
+  if (!S.token && v && v !== 'login' && v !== 'intro') { stack = []; navBack = true; go('login'); return true; }
+  return false;
+}
+function home() { stack = []; S.picked = []; S.reports = {}; S.sel = []; S.q = ''; S.range = null; S.photos = []; go('home'); }
+function to(view) { go(view); }
+
+function topbar(title, right) {
+  return '<div class="top"><button class="icon-btn" onclick="back()" aria-label="뒤로">' + I.back + '</button>' +
+    '<div class="ttl">' + (title || '') + '</div><div class="top-r">' + (right || '') + helpBtn() + '</div></div>';
+}
+/* 홈 타일 이름: '물품대여 화면'처럼 끝의 '화면'을 은은하게 */
+function hw(name) { return esc(name) + ' <span class="hl">화면</span>'; }
+function hero(title, lead, pose, leadId) {
+  return '<div class="hero"><div class="grow"><h1 class="title">' + title + '</h1>' +
+    '<p class="lead"' + (leadId ? ' id="' + leadId + '"' : '') + '>' + lead + '</p></div>' + taang(pose, 104) + '</div>';
+}
+function doneMark(pose) { return taang(pose || 'success', 168); }
+function oops(msg, pose) { return '<div class="oops">' + taang(pose || 'sorry', 110) + '<div>' + esc(msg) + '</div></div>'; }
+function bottom(html) { return '<div class="bottom"><div class="in">' + html + '</div></div>'; }
+function skel(n) { var s = ''; for (var i = 0; i < (n || 3); i++) s += '<div class="skel"></div>'; return '<div class="list" aria-busy="true">' + s + '</div>'; }
+/* 숫자만 입력 */
+function digitsOnly(el, max) { var v = el.value.replace(/\D/g, '').slice(0, max); if (v !== el.value) el.value = v; }
+/* 반납 기한 짧게: '오늘까지' · '내일까지' · '11월 8일 (일)까지' */
+function dueShort(r) { return (r.dueRel ? r.dueRel : r.due) + '까지'; }
+/* 대여 정지 규칙(주황 박스) */
+function ruleNote(c, late) {
+  return '<div class="note rule"><b class="mk">!</b><div>' + (late ? '지금 이번 학기 연체 <b>' + late + '회</b>예요.<br>' : '') +
+    '이번 학기에 연체 횟수가 <b>' + c.lateLimit + '회</b>가 되거나 <b>분실·파손</b>이 확인되면 <b>' + c.banDays + '일</b> 동안 대여가 정지돼요.</div></div>';
+}
+
+var VIEWS = {
+  /* ───────── 홈 ───────── */
+  home: function () {
+    var member = S.me.member;
+    return '<div class="home-head">' + logoHw(444, 'home-logo') +
+      '<div class="home-sub"><span class="grow"></span>' + helpBtn() +
+      '<button class="me-chip" onclick="go(\'profile\')" aria-label="내 정보">' + esc(S.me.name) + '님 ' + I.chev + '</button></div></div>' +
+      '<div class="tiles' + (member ? '' : ' three') + '" id="tiles">' + homeTiles() + '</div>' +
+      '<div id="myBox">' + myBox() + '</div>' + a2hsCard() +
+      '<p class="foot" id="homeFoot">' + esc(ORG) + '</p>';
+  },
+
+  /* ───────── 물품대여 ───────── */
+  rent: function () {
+    return topbar('물품대여') +
+      hero('빌릴까요, 반납할까요?', esc(rentLead(S.cat || S.home)), 'book', 'rentLead') +
+      '<div class="stack">' +
+      '<button class="big" id="bigBorrow" onclick="startBorrow()"><span class="ico g">' + I.book + '</span><div class="grow"><b>빌리기</b><span id="borrowSub">' + esc(borrowSub()) + '</span></div>' + I.chev + '</button>' +
+      '<button class="big" id="bigReturn" onclick="openReturn()"><span class="ico">' + I.ret + '</span><div class="grow"><b>반납하기</b><span id="returnSub">' + esc(returnSub()) + '</span></div>' + I.chev + '</button>' +
+      '</div><div id="rentNote">' + (S.cat ? rentNoteHtml(S.cat) : '') + '</div>';
+  },
+  pick: function () {
+    return topbar('빌리기') +
+      '<h1 class="title">무엇을 빌릴까요?</h1>' +
+      '<div class="seg" role="tablist" id="seg"></div>' +
+      '<label class="search">' + I.search + '<input id="q" type="search" placeholder="이름이나 번호로 찾기" autocomplete="off" aria-label="물품 찾기" value="' + esc(S.q) + '"></label>' +
+      '<div id="items">' + skel(3) + '</div>' +
+      bottom('<button class="btn primary" id="pickBtn" disabled onclick="openCheck()">골라 주세요</button>');
+  },
+  rented: function () {
+    var r = S.result, rep = r.reported || [];
+    var repCard = rep.length ? '<div class="h2">학생회에 알린 물품</div><div class="card">' + rep.map(function (x) {
+      return '<div class="row line"><span class="num">' + esc(x.id) + '</span><span class="grow nm">' + esc(x.name) + '</span><span class="chip bad">' + (x.kind === 'missing' ? '자리에 없어요' : '파손') + '</span></div>';
+    }).join('') + '</div>' : '';
+    if (!r.items.length) {
+      return '<div class="done">' + doneMark('thanks') +
+        '<h1 class="title" style="margin-top:14px">알려 줘서 고마워요</h1><p class="lead">학생회가 확인하고 정리할게요</p></div>' + repCard +
+        bottom('<button class="btn primary" onclick="home()">확인</button>');
+    }
+    var same = r.items.every(function (x) { return x.due === r.items[0].due; });
+    return '<div class="done">' + doneMark('success') +
+      '<h1 class="title" style="margin-top:14px">빌렸어요</h1><p class="lead" style="margin:0">' + (same ? '반납 기한' : '가장 빠른 반납 기한') + '</p>' +
+      '<div class="due">' + esc(r.dueRel ? r.dueRel + ' 23:59' : r.due) + '</div>' +
+      (r.dueRel ? '<p class="lead" style="margin:0">' + esc(r.due) + '</p>' : '<p class="lead" style="margin:0">23:59까지</p>') + '</div>' +
+      '<div class="card" style="margin-top:22px">' + r.items.map(function (it) {
+        return '<div class="row line"><span class="num">' + esc(it.id) + '</span><span class="grow nm">' + esc(it.name) + '</span>' +
+          (same ? '' : '<span class="chip ' + (it.dueRel ? 'warn' : 'mute') + '">' + esc(dueShort(it)) + '</span>') + '</div>';
+      }).join('') + '</div>' + repCard +
+      '<p class="foot" style="margin-top:16px">물품에 적힌 번호가 맞는지 확인해 주세요</p>' +
+      bottom('<button class="btn primary" onclick="home()">확인</button>');
+  },
+  mine: function () {
+    var list = rentMine();
+    if (list === null) return topbar('반납하기') + '<h1 class="title">무엇을 돌려놓았나요?</h1><div id="mineBox">' + skel(2) + '</div>';
+    var open = list.filter(function (r) { return r.status === '대여중'; });
+    var waiting = list.filter(function (r) { return r.status !== '대여중'; });
+    var html = topbar('반납하기');
+    if (!list.length) {
+      return html + '<div class="done">' + taang('thinking', 150) + '<h1 class="title" style="margin-top:14px">빌린 물품이 없어요</h1></div>' +
+        bottom('<button class="btn soft" onclick="home()">처음으로</button>');
+    }
+    var loc = (S.cat && S.cat.location) || (S.home && S.home.location) || '';
+    html += '<h1 class="title">무엇을 돌려놓았나요?</h1><p class="lead">' + esc(loc ? loc + '에 두고 골라 주세요' : '제자리에 두고 골라 주세요') + '</p>';
+    if (open.length) {
+      html += '<div class="list">' + open.map(function (r) {
+        var on = S.sel.indexOf(r.rid) >= 0;
+        var chip = r.overdue ? '<span class="chip bad">' + r.daysLate + '일 지남</span>' : '<span class="chip ' + (r.dueRel ? 'warn' : 'mute') + '">' + esc(dueShort(r)) + '</span>';
+        return '<button class="item' + (on ? ' on' : '') + '" aria-pressed="' + on + '" onclick="toggleSel(\'' + jsq(r.rid) + '\', this)"><span class="num">' + esc(r.itemId) + '</span>' +
+          '<div class="grow"><div class="nm">' + esc(r.itemName) + '</div><div class="ds">' + chip + '</div></div><span class="check">' + I.check + '</span></button>';
+      }).join('') + '</div>';
+    }
+    if (waiting.length) {
+      html += '<div class="h2">학생회가 확인하고 있어요</div><div class="list">' + waiting.map(function (r) {
+        return '<div class="item" disabled><span class="num">' + esc(r.itemId) + '</span><div class="grow"><div class="nm">' + esc(r.itemName) + '</div></div><span class="chip warn">반납 확인 중</span></div>';
+      }).join('') + '</div>';
+    }
+    html += open.length
+      ? bottom('<button class="btn primary" id="retBtn" ' + (S.sel.length ? '' : 'disabled') + ' onclick="submitReturn(this)">' + (S.sel.length ? '제자리에 돌려놓았어요' : '골라 주세요') + '</button>')
+      : bottom('<button class="btn soft" onclick="home()">처음으로</button>');
+    return html;
+  },
+  returned: function () {
+    return '<div class="done">' + doneMark('thanks') +
+      '<h1 class="title" style="margin-top:14px">반납했어요</h1><p class="lead">학생회가 확인하면 메일로 알려 드려요</p></div>' +
+      bottom('<button class="btn primary" onclick="home()">확인</button>');
+  },
+
+  /* ───────── 강의실 예약 ───────── */
+  room: function () {
+    return topbar('강의실 예약', '<button class="pill-btn" onclick="openRoomMine(this)">' + I.list + '내 예약</button>') +
+      '<div class="hero"><div class="grow"><h1 class="title" id="roomTitle">' + esc((S.room && S.room.room) || (S.home && S.home.roomName) || '북악관 1005호') + '</h1>' +
+      '<p class="lead" id="roomLead" style="margin-bottom:14px">' + esc(S.room ? roomLeadText(S.room) : ' ') + '</p></div>' + taang('room', 104) + '</div>' +
+      '<div class="h2" style="margin-top:4px">몇 명이 쓰나요?</div><div class="seg group" id="groupSeg"></div>' +
+      '<div class="row" style="justify-content:space-between;margin-top:18px"><div class="months" id="months"></div></div>' +
+      '<p class="hint" id="openNote" style="margin-top:8px"></p>' +
+      '<div class="cal" id="cal"><div class="skel" style="height:260px;border-radius:12px"></div></div>' +
+      '<div id="dayBox"></div>' +
+      bottom('<button class="btn primary" id="bookBtn" disabled onclick="go(\'roomForm\')">날짜와 시간을 골라 주세요</button>');
+  },
+  roomForm: function () {
+    var r = S.room, g = S.range, two = S.group === 2, min3 = Math.max(3, r.minPeople || 2);
+    if (!two && !(parseInt(S.people, 10) >= min3)) S.people = String(min3);
+    return topbar('강의실 예약') +
+      '<h1 class="title">' + (two ? '이대로 예약할까요?' : '몇 명이 쓰나요?') + '</h1>' +
+      '<div class="card" style="margin-bottom:18px"><div class="kv"><span>강의실</span><b>' + esc(r.room) + '</b></div>' +
+      '<div class="kv"><span>날짜</span><b>' + esc(dayLabel(S.day)) + '</b></div>' +
+      '<div class="kv"><span>시간</span><b>' + hh(g.start) + '~' + hh(g.end) + ' · ' + (g.end - g.start) + '시간</b></div>' +
+      (two ? '<div class="kv"><span>인원</span><b>2명</b></div>' : '') + '</div>' +
+      (two ? '' :
+      '<div class="field"><span>사용 인원 · ' + min3 + '~' + (r.cap || 30) + '명</span><div class="stepper">' +
+      '<button type="button" aria-label="한 명 줄이기" onclick="stepPeople(-1)">−</button>' +
+      '<input id="k_people" inputmode="numeric" maxlength="3" value="' + (S.people || '') + '" placeholder="몇 명" aria-label="사용 인원" oninput="S.people=this.value.replace(/\\D/g,\'\')">' +
+      '<span class="unit">명</span><button type="button" aria-label="한 명 늘리기" onclick="stepPeople(1)">+</button></div></div>') +
+      '<label class="field"><span>사용 목적 (선택)</span><input id="k_purpose" maxlength="60" placeholder="예: 전공 스터디, 발표 연습"></label>' +
+      bottom('<button class="btn primary" id="roomBtn" onclick="submitRoom(this)">' + hh(g.start) + '~' + hh(g.end) + ' 예약하기</button>');
+  },
+  roomDone: function () {
+    var r = S.roomResult;
+    return '<div class="done">' + doneMark('success') +
+      '<h1 class="title" style="margin-top:14px">예약했어요</h1><p class="lead" style="margin:0">' + esc(r.room) + '</p>' +
+      '<div class="due">' + esc(r.dateLabel) + '</div><div class="due" style="font-size:26px;margin-top:0">' + esc(r.time) + '</div>' +
+      '<p class="lead" style="margin:6px 0 0">' + r.people + '명이 써요</p></div>' +
+      (r.entry ? '<div class="note info" style="margin-top:24px"><b class="mk">i</b><div>' + esc(r.entry) + '</div></div>' : '') +
+      '<div class="note"><b class="mk">!</b><div>다 쓴 뒤에는 원래 상태로 정리하고, <b>내 예약 → 퇴실 사진 올리기</b>에서 강의실 사진을 올려 주세요.</div></div>' +
+      bottom('<button class="btn primary" onclick="home()">확인</button>');
+  },
+  roomMine: function () {
+    var list = S.roomMine;
+    var html = topbar('내 예약');
+    if (list === null) return html + '<h1 class="title">' + esc(S.me.name) + '님의 예약</h1><div id="rmBox">' + skel(2) + '</div>';
+    if (!list.length) {
+      return html + '<div class="done">' + taang('thinking', 150) + '<h1 class="title" style="margin-top:14px">예약이 없어요</h1><p class="lead">최근 2주와 앞으로의 예약이 보여요</p></div>' +
+        bottom('<button class="btn primary" onclick="stack=[\'home\'];go(\'room\')">예약하러 가기</button>');
+    }
+    html += '<h1 class="title">' + esc(S.me.name) + '님의 예약</h1><p class="lead">최근 2주와 앞으로의 예약</p>';
+    html += list.map(function (r) {
+      var acts = '';
+      if (r.canCheckout) acts += '<button class="btn primary" onclick="openCheckout(\'' + jsq(r.rid) + '\')">' + I.cam.replace('<svg', '<svg width="20" height="20"') + ' 퇴실 사진 올리기</button>';
+      if (r.canCancel) acts += '<button class="btn line" onclick="cancelRoom(\'' + jsq(r.rid) + '\', this)">예약 취소</button>';
+      return '<div class="rv"><div class="row"><div class="grow"><div class="when">' + esc(r.dateLabel) + '</div>' +
+        '<div class="ds" style="font-size:15px;font-variant-numeric:tabular-nums">' + esc(r.time) + (r.people ? ' · ' + r.people + '명' : '') + (r.purpose ? ' · ' + esc(r.purpose) : '') + '</div></div>' + roomChip(r) + '</div>' +
+        (acts ? '<div class="acts">' + acts + '</div>' : '') + '</div>';
+    }).join('');
+    return html + bottom('<button class="btn soft" onclick="stack=[\'home\'];go(\'room\')">새로 예약하기</button>');
+  },
+  checkout: function () {
+    var r = S.roomTarget, info = S.room || {};
+    var orig = (info.originals || []);
+    return topbar('퇴실하기') +
+      '<h1 class="title">원래 상태 그대로,<br>강의실 사진을 찍어 주세요</h1>' +
+      '<p class="lead">' + esc(r.dateLabel) + ' · ' + esc(r.time) + ' · 1~3장</p>' +
+      '<div class="photos" id="photoBox">' + photoSlots() + '</div>' +
+      '<div class="h2" style="margin-top:30px">원래 모습</div>' +
+      (info.exit ? '<div class="note" style="margin-top:0"><b class="mk">!</b><div>' + esc(info.exit) + '</div></div>' : '') +
+      (orig.length
+        ? '<div class="orig">' + orig.map(function (o) { return '<figure><img src="' + esc(o.url) + '" alt="' + esc(o.name) + '" loading="lazy" decoding="async"><figcaption>' + esc(o.name) + '</figcaption></figure>'; }).join('') + '</div>'
+        : '<div class="orig-empty" style="margin-top:12px">원본 사진이 아직 없어요.</div>') +
+      bottom('<button class="btn primary" id="outBtn" ' + (S.photos.length ? '' : 'disabled') + ' onclick="submitCheckout(this)">' + outLabel() + '</button>');
+  },
+  checkedOut: function () {
+    return '<div class="done">' + doneMark('thanks') +
+      '<h1 class="title" style="margin-top:14px">퇴실했어요</h1><p class="lead">깨끗하게 써 줘서 고마워요.<br>학생회가 사진을 확인해요.</p></div>' +
+      bottom('<button class="btn primary" onclick="home()">확인</button>');
+  },
+
+  /* ───────── 건의 ───────── */
+  suggest: function () {
+    var cats = [['해 주세요', '~해 주세요'], ['불편해요', '~이 불편해요'], ['기능 추가', '~기능을 넣어 주세요'], ['버그 신고', '~이 안 돼요'], ['기타', '그 밖의 이야기']];
+    var mineN = (store.get('codes') || []).length;
+    return topbar('건의', '<button class="pill-btn" onclick="go(\'sgMine\')">' + (mineN ? I.list + '내 건의 ' + mineN : I.search + '찾기') + '</button>') +
+      hero('무엇이든 적어 주세요', '학생회만 읽어요', 'letter') +
+      '<div class="h2" style="margin-top:6px">어떤 건의인가요?</div>' +
+      '<div class="cats">' + cats.map(function (c) {
+        return '<button class="cat' + (S.sgCat === c[0] ? ' on' : '') + '" onclick="pickCat(\'' + c[0] + '\', this)"><b>' + c[0] + '</b><small>' + c[1] + '</small></button>';
+      }).join('') + '</div>' +
+      '<div class="h2">내용</div>' +
+      '<label class="field" style="margin-bottom:6px"><textarea id="sg_text" maxlength="1000" aria-label="건의 내용" placeholder="예: 과방 콘센트가 부족해요. 멀티탭을 하나 더 놓아 주세요.">' + esc(S.sgText) + '</textarea>' +
+      '<span class="count" id="sg_count">' + S.sgText.length + ' / 1000</span></label>' +
+      '<div class="h2">보내는 사람</div>' +
+      '<div class="seg"><button id="anonY" class="' + (S.anon ? 'on' : '') + '" onclick="setAnon(true)">익명</button><button id="anonN" class="' + (S.anon ? '' : 'on') + '" onclick="setAnon(false)">실명</button></div>' +
+      '<div id="anonBox" style="margin-top:12px"></div>' +
+      bottom('<button class="btn primary" id="sgBtn" onclick="submitSuggest(this)">보내기</button>');
+  },
+  sgDone: function () {
+    var r = S.sgResult;
+    return '<div class="done">' + doneMark('success') +
+      '<h1 class="title" style="margin-top:14px">건의를 보냈어요</h1><p class="lead" style="margin:0">접수번호</p>' +
+      '<div class="code">' + esc(r.code) + '</div>' +
+      '<p class="lead" style="margin-top:6px">이 번호로 답변을 볼 수 있어요.<br>이 휴대폰에는 기억해 둘게요.</p>' +
+      '<button class="btn sm soft" onclick="copyText(\'' + jsq(r.code) + '\')">번호 복사</button></div>' +
+      bottom('<button class="btn primary" onclick="home()">확인</button>');
+  },
+  sgMine: function () {
+    return topbar('내 건의') +
+      hero('학생회 답변', '접수번호로 확인해요', 'thinking') +
+      '<div class="row"><label class="search grow" style="margin-top:0">' + I.search + '<input id="sg_find" maxlength="8" placeholder="접수번호 6자리" aria-label="접수번호" autocomplete="off" style="text-transform:uppercase"></label>' +
+      '<button class="btn sm primary" style="height:48px" onclick="findCode(this)">찾기</button></div>' +
+      '<div id="sgList">' + skel(1) + '</div>';
+  },
+
+  /* ───────── 혜택 ───────── */
+  links: function () {
+    return topbar('혜택') +
+      hero('자주 찾는 곳, 한 번에', '국민대 시스템과 대학생 혜택', 'point') +
+      '<div id="linkBox">' + (S.links ? linksHtml(S.links) : skel(3)) + '</div>';
+  }
+};
+
+function tile(view, pose, name, sub) {
+  return '<button class="tile" onclick="to(\'' + view + '\')">' + taang(pose, 86, 'tg') + '<div class="tt"><b>' + name + '</b><small id="sub_' + view + '">' + esc(sub) + '</small></div></button>';
+}
+/* 홈 타일: 설명 대신 지금 상태 */
+function homeTiles() {
+  var h = S.home || {}, n = function (v) { return v != null; };
+  var newAns = newAnswers().length;
+  return (S.me.member ? tile('rent', 'book', hw('물품대여'), n(h.itemsAvailable) ? '빌릴 수 있는 물품 ' + h.itemsAvailable + '개' : '전공서적·복지물품') : '') +
+    tile('room', 'room', hw('강의실 예약'), n(h.roomFreeToday) ? (h.roomFreeToday ? '오늘 빈 시간 ' + h.roomFreeToday + '시간' : '오늘은 예약이 다 찼어요') : (h.roomName || '북악관 1005호')) +
+    tile('suggest', 'letter', hw('건의'), newAns ? '새 답변 ' + newAns + '개' : '학생회에 건의해요') +
+    tile('links', 'point', hw('혜택'), '학교 시스템·대학생 혜택');
+}
+/* 아직 열어 보지 않은 답변 */
+function newAnswers() {
+  var seen = store.get('seenAns') || [];
+  return ((S.home && S.home.answered) || []).filter(function (c) { return seen.indexOf(c) < 0; });
+}
+/* 홈 아래: 내 대여·예약 바로 가기 */
+function myBox() {
+  var h = S.home || {}, rows = '';
+  var bar = function (fn, icon, title, sub, chip, tone) {
+    return '<button class="qbar' + (tone ? ' ' + tone : '') + '" onclick="' + fn + '()"><span class="qi">' + icon + '</span>' +
+      '<span class="qt"><b>' + title + '</b><small>' + sub + '</small></span>' + (chip || '') + '<span class="qc" aria-hidden="true">›</span></button>';
+  };
+  var rent = (S.me.member && h.rentMine) || [];
+  if (rent.length) {
+    var out = rent.filter(function (r) { return r.status === '대여중'; });
+    var late = rent.filter(function (r) { return r.overdue; }).length;
+    rows += out.length
+      ? bar('openMineFromHome', I.box, '반납하기', late ? '반납 기한이 지난 물품 ' + late + '개' : '빌린 물품 ' + out.length + '개 · ' + esc(dueShort(out[0])),
+        late ? '<span class="chip bad">연체</span>' : (out[0].dueRel ? '<span class="chip warn">' + esc(out[0].dueRel) + '</span>' : ''), late ? 'bad' : (out[0].dueRel === '오늘' ? 'warn' : ''))
+      : bar('openMineFromHome', I.box, '대여 현황', '학생회가 반납을 확인하고 있어요', '');
+  }
+  var rooms = (h.roomMine || []).filter(function (r) { return r.status === '예약확정'; });
+  if (rooms.length) {
+    var r0 = rooms[0], need = rooms.filter(function (r) { return r.canCheckout; }).length;
+    rows += need
+      ? bar('openRoomMineFromHome', I.cam, '퇴실 사진 올리기', '강의실 사용이 끝나면 사진을 올려 주세요', '<span class="chip warn">퇴실</span>', 'warn')
+      : bar('openRoomMineFromHome', I.door, '내 예약', esc(r0.dateLabel + ' ' + r0.time) + (rooms.length > 1 ? ' 외 ' + (rooms.length - 1) + '건' : ''), '');
+  }
+  return rows ? '<div class="h2" style="margin-top:30px">' + esc(S.me.name) + '님의 이용</div><div class="quick">' + rows + '</div>' : '';
+}
+/* 홈 화면에 추가 안내: 처음 한 번, 닫으면 다시 안 뜬다. 이미 앱으로 열었으면 안 뜬다. */
+var installEvt = null;
+window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvt = e; });
+function isStandalone() { return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }
+function a2hsCard() {
+  if (isStandalone() || store.get('a2hs') || (window.google && google.script)) return '';
+  return '<div class="a2hs" id="a2hs">' + logoCircle(40) + '<div class="grow"><b>홈 화면에 추가하기</b><small>앱처럼 바로 열 수 있어요</small></div>' +
+    '<button class="btn sm primary" onclick="addToHome()">추가</button><button class="icon-btn" aria-label="안내 닫기" onclick="closeA2hs()">' + I.close + '</button></div>';
+}
+function closeA2hs() { store.set('a2hs', 1); var c = $('#a2hs'); if (c) { c.classList.add('gone'); setTimeout(function () { c.remove(); }, 240); } }
+function addToHome() {
+  if (installEvt) { installEvt.prompt(); installEvt.userChoice.then(function (r) { if (r && r.outcome === 'accepted') closeA2hs(); installEvt = null; }); return; }
+  var ios = /iPhone|iPad|iPod/.test(navigator.userAgent), inApp = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV/i.test(navigator.userAgent);
+  var steps = inApp
+    ? '<li>오른쪽 아래(또는 위) <b>⋯</b> 메뉴에서 <b>다른 브라우저로 열기</b>를 눌러요.</li><li>' + (ios ? 'Safari' : 'Chrome') + '에서 다시 이 순서를 따라 해요.</li>'
+    : ios ? '<li>아래쪽 <b>공유</b> 버튼(네모에서 화살표가 나오는 모양)을 눌러요.</li><li><b>홈 화면에 추가</b>를 눌러요.</li><li>오른쪽 위 <b>추가</b>를 누르면 끝!</li>'
+      : '<li>오른쪽 위 <b>⋮</b> 메뉴를 눌러요.</li><li><b>홈 화면에 추가</b> 또는 <b>앱 설치</b>를 눌러요.</li>';
+  var m = document.createElement('div'); m.className = 'overlay sheet-up';
+  m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="a2T"><div class="row"><b id="a2T" class="grow" style="font-size:19px">홈 화면에 추가하기</b>' +
+    '<button class="icon-btn" aria-label="닫기" data-x>' + I.close + '</button></div><ol class="steps-ol">' + steps + '</ol>' +
+    '<button class="btn primary" data-x style="margin-top:14px">알겠어요</button></div>';
+  m.onclick = function (e) { if (e.target === m || e.target.closest('[data-x]')) closeOverlay(m); };
+  openOverlay(m);
+}
+
+var AFTER = {
+  home: function () { if (Date.now() - S.homeAt > 15000 || S.homeMut !== S.mut) refreshHome(); },
+  rent: function () {
+    loadCatalog(catStale()).then(paintRent).catch(function (e) { var n = $('#rentNote'); if (n) n.innerHTML = '<div class="card">' + oops(e.message) + '</div>'; });
+  },
+  pick: function () {
+    var q = $('#q');
+    q.addEventListener('input', function () { S.q = q.value; renderItems(); });
+    if (S.cat) { renderSeg(); renderItems(); }
+    if (!S.cat || catStale()) loadCatalog(true).then(function () { renderSeg(); renderItems(); }).catch(function (e) { var b = $('#items'); if (b) b.innerHTML = '<div class="card">' + oops(e.message) + '</div>'; });
+  },
+  mine: function () {
+    var before = JSON.stringify(rentMine()), had = rentMine() !== null;
+    loadCatalog(true).then(function (c) {
+      if (stack[stack.length - 1] !== 'mine' || JSON.stringify(c.mine) === before) return;
+      // 그사이 학생회가 처리했으면(예: 자리에 없어요) 새 목록으로 다시 그린다. 고른 것은 그대로 둔다
+      var openIds = c.mine.filter(function (r) { return r.status === '대여중'; }).map(function (r) { return r.rid; });
+      S.sel = S.sel.filter(function (id) { return openIds.indexOf(id) >= 0; });
+      if (!had) presetSel();
+      noGhost = true; go('mine', false);
+    }).catch(function (e) { var b = $('#mineBox'); if (b) b.innerHTML = '<div class="card">' + oops(e.message) + '</div>'; });
+  },
+  room: function () {
+    if (S.room) { renderGroup(); renderRoom(); }
+    loadRoom(!!S.room).catch(function (e) { var c = $('#cal'); if (c) c.innerHTML = oops(e.message); });
+    poll = setInterval(function () { if (!document.hidden) loadRoom(true).catch(function () { }); }, 30000);
+  },
+  roomMine: function () {
+    var fresh = S.roomMine !== null;
+    call('roomMine', {}).then(function (list) {
+      var changed = JSON.stringify(list) !== JSON.stringify(S.roomMine);
+      S.roomMine = list;
+      if ((changed || !fresh) && stack[stack.length - 1] === 'roomMine') go('roomMine', false);
+    }).catch(function (e) { var b = $('#rmBox'); if (b) b.innerHTML = '<div class="card">' + oops(e.message) + '</div>'; });
+  },
+  suggest: function () {
+    var t = $('#sg_text');
+    t.addEventListener('input', function () { S.sgText = t.value; $('#sg_count').textContent = t.value.length + ' / 1000'; });
+    renderAnon();
+  },
+  sgMine: function () {
+    $('#sg_find').addEventListener('keydown', function (e) { if (e.key === 'Enter') findCode(null); });
+    loadCodes(store.get('codes') || []);
+  },
+  links: function () {
+    (S.links ? Promise.resolve(S.links) : call('links')).then(function (g) {
+      S.links = g;
+      var box = $('#linkBox'); if (box) box.innerHTML = linksHtml(g);
+    }).catch(function (e) { var b = $('#linkBox'); if (b) b.innerHTML = '<div class="card">' + oops(e.message) + '</div>'; });
+  }
+};
+/* 화면이 바뀌어도 진행 중인 '같은 요청'은 한 번만 */
+var inflight = {};
+function once(key, fn) {
+  if (!inflight[key]) inflight[key] = fn().then(function (v) { delete inflight[key]; return v; }, function (e) { delete inflight[key]; throw e; });
+  return inflight[key];
+}
+
+/* ── 홈 ── */
+function refreshHome() {
+  var start = S.mut;
+  return once('home' + start, function () { return call('home', { codes: store.get('codes') || [] }); }).then(function (h) {
+    if (start !== S.mut) return refreshHome(); // 가는 동안 빌리기·반납이 있었으면 버리고 다시
+    var wasMember = S.me.member;
+    S.home = h; S.homeAt = Date.now(); S.homeMut = start;
+    if (S.cat && h.rentMine) S.cat.mine = h.rentMine;
+    if (h.me) { S.me = h.me; store.set('user', h.me); }
+    if (h.orgName && h.orgName !== ORG) { ORG = h.orgName; store.set('org', ORG); }
+    var keep = Object.assign({}, h); store.set('home', keep);
+    if (stack[stack.length - 1] !== 'home') return;
+    if (wasMember !== S.me.member) { noGhost = true; return go('home', false); }
+    var fresh = document.createElement('div'); fresh.innerHTML = homeTiles();
+    ['rent', 'room', 'suggest', 'links'].forEach(function (k) {
+      var a = $('#sub_' + k), b = fresh.querySelector('#sub_' + k);
+      if (a && b && a.textContent !== b.textContent) a.textContent = b.textContent;
+    });
+    var box = $('#myBox'); if (box) { var html = myBox(); if (box.innerHTML !== html) { box.innerHTML = html; box.classList.add('pane-in'); } }
+    var f = $('#homeFoot'); if (f) f.textContent = ORG;
+  }).catch(function () { });
+}
+function openMineFromHome() { stack = ['home', 'rent']; presetSel(); go('mine'); }
+function openRoomMineFromHome() { stack = ['home', 'room']; S.roomMine = (S.home && S.home.roomMine) || null; go('roomMine'); }
+
+/* ── 물품대여 ── */
+function catStale() { return !S.cat || Date.now() - S.catAt > 30000; }
+function loadCatalog(force) {
+  if (S.cat && !force) return Promise.resolve(S.cat);
+  var start = S.mut;
+  return once('catalog' + start, function () { return call('catalog'); }).then(function (c) {
+    if (start !== S.mut) return loadCatalog(true); // 가는 동안 빌리기·반납이 있었으면 버리고 다시
+    S.cat = c; S.catAt = Date.now();
+    if (S.home) { S.home.rentMine = c.mine; store.set('home', S.home); }
+    return c;
+  });
+}
+function rentLead(c) {
+  if (!c) return ' ';
+  var loc = c.location, max = c.maxPerPerson;
+  return (loc ? loc + ' · ' : '') + '한 사람 ' + (max || 3) + '개까지';
+}
+function borrowSub() {
+  if (S.cat) return '빌릴 수 있는 물품 ' + S.cat.items.filter(function (it) { return it.available; }).length + '개';
+  return S.home && S.home.itemsAvailable != null ? '빌릴 수 있는 물품 ' + S.home.itemsAvailable + '개' : '번호를 보고 골라요';
+}
+function rentMine() { return S.cat ? S.cat.mine : (S.home && S.home.rentMine) || null; }
+function returnSub() {
+  var m = rentMine(); if (m === null) return '제자리에 돌려놓은 뒤';
+  var out = m.filter(function (r) { return r.status === '대여중'; });
+  if (!m.length) return '빌린 물품이 없어요';
+  if (!out.length) return '학생회가 반납을 확인하고 있어요';
+  var late = out.filter(function (r) { return r.overdue; }).length;
+  return late ? '반납 기한이 지난 물품 ' + late + '개' : '빌린 물품 ' + out.length + '개 · ' + dueShort(out[0]);
+}
+function rentNoteHtml(c) {
+  if (c.ban) return '<div class="note bad"><b class="mk">!</b><div><b>' + esc(c.ban.until) + '까지 물품 대여가 정지돼 있어요</b><br>사유: ' + esc(c.ban.reason) + '<br>반납은 그대로 할 수 있어요.</div></div>';
+  return ruleNote(c, c.lateCount);
+}
+/* 물품대여 화면: 받은 정보로 글자만 바꾼다(화면을 다시 그리지 않는다) */
+function paintRent(c) {
+  if (stack[stack.length - 1] !== 'rent') return;
+  var set = function (id, t) { var el = $('#' + id); if (el && el.textContent !== t) el.textContent = t; };
+  set('rentLead', rentLead(c)); set('borrowSub', borrowSub()); set('returnSub', returnSub());
+  var n = $('#rentNote'), html = rentNoteHtml(c);
+  if (n && n.innerHTML !== html) { n.innerHTML = html; n.classList.add('pane-in'); }
+  var b = $('#bigBorrow'); if (b) b.classList.toggle('off', !!c.ban);
+}
+function startBorrow() {
+  if (S.cat && S.cat.ban) { toast(S.cat.ban.until + '까지 물품 대여가 정지돼 있어요'); return; }
+  S.picked = []; S.reports = {}; go('pick');
+}
+function presetSel() {
+  S.sel = [];
+  var m = rentMine() || [], open = m.filter(function (r) { return r.status === '대여중'; });
+  if (open.length === 1) S.sel = [open[0].rid];
+}
+function openReturn() { presetSel(); go('mine'); }
+function pickedItems() {
+  if (!S.cat) return [];
+  return S.picked.map(function (id) { return S.cat.items.filter(function (it) { return it.id === id; })[0]; }).filter(Boolean);
+}
+function renderSeg() {
+  var seg = $('#seg'); if (!seg || !S.cat) return;
+  seg.innerHTML = ['전공서적', '복지물품'].map(function (t) {
+    var n = S.cat.items.filter(function (it) { return it.type === t && it.available; }).length;
+    return '<button role="tab" aria-selected="' + (S.tab === t) + '" class="' + (S.tab === t ? 'on' : '') + '" onclick="setTab(\'' + t + '\')">' + t + ' ' + n + '</button>';
+  }).join('');
+}
+function setTab(t) { S.tab = t; renderSeg(); renderItems(); }
+var ITEM_STATE = {
+  '점검중': ['warn', '점검 중', '학생회가 상태를 확인하고 있어요'],
+  '반납확인중': ['warn', '반납 확인 중', '학생회가 반납을 확인하고 있어요']
+};
+function renderItems() {
+  var box = $('#items'); if (!box || !S.cat) return;
+  var q = S.q.trim().toLowerCase().replace(/\s/g, '');
+  var list = S.cat.items.filter(function (it) {
+    if (q) return (it.name + it.id + it.desc).toLowerCase().replace(/\s/g, '').indexOf(q) >= 0;
+    return it.type === S.tab;
+  });
+  list.sort(function (a, b) { return (b.available - a.available) || a.id.localeCompare(b.id); });
+  if (!list.length) box.innerHTML = '<div class="card">' + oops(q ? '찾는 물품이 없어요' : '아직 등록된 물품이 없어요', q ? 'thinking' : 'sorry') + '</div>';
+  else box.innerHTML = '<div class="list">' + list.map(function (it) {
+    var on = S.picked.indexOf(it.id) >= 0, st = ITEM_STATE[it.status];
+    var sub = it.available ? '<span class="due-tag' + (/당일|익일/.test(it.dueLabel) ? ' soon' : '') + '">' + esc(it.dueLabel) + '</span>' + (it.desc ? ' ' + esc(it.desc) : '')
+      : st ? st[2] : (it.due ? esc(it.due) + ' 반납 예정' : '대여 중');
+    return '<button class="item' + (on ? ' on' : '') + '" ' + (it.available ? 'aria-pressed="' + on + '"' : 'disabled') + ' onclick="togglePick(\'' + jsq(it.id) + '\')">' +
+      '<span class="num">' + esc(it.id) + '</span><div class="grow"><div class="nm">' + esc(it.name) + '</div><div class="ds">' + sub + '</div></div>' +
+      (it.available ? '<span class="check">' + I.check + '</span>' : '<span class="chip ' + (st ? st[0] : 'mute') + '">' + (st ? st[1] : '대여 중') + '</span>') + '</button>';
+  }).join('') + '</div>';
+  var btn = $('#pickBtn');
+  btn.disabled = !S.picked.length;
+  btn.textContent = S.picked.length ? S.picked.length + '개 빌리기' : '골라 주세요';
+}
+function togglePick(id) {
+  var i = S.picked.indexOf(id);
+  if (i >= 0) { S.picked.splice(i, 1); delete S.reports[id]; }
+  else {
+    var max = (S.cat && S.cat.maxPerPerson) || 3;
+    if (S.picked.length >= max) { toast('한 번에 ' + max + '개까지 빌릴 수 있어요'); return; }
+    S.picked.push(id);
+  }
+  renderItems();
+}
+
+/* ── 빌리기 직전: 물품 상태가 어떤가요? (이 창에서 바로 빌린다) ── */
+/* S.reports[id] = {kind:'missing'|'damaged', detail} · 없으면 좋아요 */
+function openCheck() {
+  if (!S.picked.length) return;
+  var m = document.createElement('div'); m.className = 'overlay chk'; m.id = 'chk';
+  m.onclick = function (e) { if (e.target === m) closeOverlay(m); };
+  openOverlay(m);
+  renderCheck();
+}
+function renderCheck() {
+  var m = $('#chk'); if (!m) return;
+  var y = m.firstChild ? m.firstChild.scrollTop : 0;
+  var seg = function (id, val, cur, label, tone) {
+    return '<button class="' + (cur === val ? 'on ' + tone : '') + '" aria-pressed="' + (cur === val) + '" onclick="setCheck(\'' + jsq(id) + '\',\'' + val + '\')">' + label + '</button>';
+  };
+  var items = pickedItems();
+  var rentN = items.filter(function (it) { return !S.reports[it.id]; }).length, repN = items.length - rentN;
+  var label = !repN ? (items.length > 1 ? items.length + '개 빌릴게요' : '빌릴게요') : rentN ? '신고하고 ' + rentN + '개 빌릴게요' : '신고할게요';
+  m.innerHTML = '<div class="sheet chk-sheet" role="dialog" aria-modal="true" aria-labelledby="chkT">' +
+    '<div class="chk-head">' + taang('surprised', 112) + '<div class="grow"><b id="chkT">물품 상태가 어떤가요?</b>' +
+    '<small>가져가기 전에 한번 살펴봐 주세요.</small></div>' +
+    '<button class="icon-btn" aria-label="닫기" onclick="closeTopOverlay()">' + I.close + '</button></div>' +
+    items.map(function (it) {
+      var r = S.reports[it.id], cur = r ? r.kind : 'ok';
+      var html = '<div class="ck"><div class="row"><span class="num">' + esc(it.id) + '</span><div class="grow"><div class="nm">' + esc(it.name) + '</div><div class="ds">' + esc(it.dueLabel) + '</div></div></div>' +
+        '<div class="ck-seg">' + seg(it.id, 'ok', cur, '좋아요', 'good') + seg(it.id, 'missing', cur, '자리에 없어요', 'bad') + seg(it.id, 'damaged', cur, '파손됐어요', 'bad') + '</div>';
+      if (cur !== 'ok') html += '<p class="ck-hint">이 물품은 빼고 빌려요. 학생회가 확인할게요.</p>';
+      if (cur === 'damaged') {
+        html += '<label class="field ck-detail"><span>자세히 어느 부분이 어떻게 파손되어 있는지 알려주세요.</span>' +
+          '<textarea id="ckd_' + esc(it.id) + '" maxlength="300" placeholder="예: 표지 모서리가 찢어졌고, 30~40쪽에 낙서가 있어요" oninput="S.reports[\'' + jsq(it.id) + '\'].detail=this.value">' + esc(r.detail || '') + '</textarea></label>';
+      }
+      return html + '</div>';
+    }).join('') +
+    '<button class="btn primary" id="rentBtn" style="margin-top:16px" onclick="submitRent(this)">' + label + '</button></div>';
+  m.firstChild.scrollTop = y;
+}
+function setCheck(id, kind) {
+  if (S.renting) return;
+  if (kind === 'ok') delete S.reports[id];
+  else if (!S.reports[id] || S.reports[id].kind !== kind) S.reports[id] = { kind: kind, detail: '' };
+  renderCheck();
+  if (kind === 'damaged') { var t = $('#ckd_' + id); if (t) t.focus(); }
+}
+function submitRent(btn) {
+  if (S.renting) return;
+  for (var i = 0; i < S.picked.length; i++) {
+    var id = S.picked[i], r = S.reports[id];
+    if (r && r.kind === 'damaged' && String(r.detail || '').trim().length < 4) {
+      toast('어느 부분이 어떻게 파손됐는지 알려 주세요'); var t = $('#ckd_' + id); if (t) t.focus(); return;
+    }
+  }
+  busy(btn, true); S.renting = true; S.mut++;
+  var reports = S.picked.filter(function (id) { return S.reports[id]; }).map(function (id) {
+    return { itemId: id, kind: S.reports[id].kind, detail: S.reports[id].detail || '' };
+  });
+  call('rent', { itemIds: S.picked, reports: reports })
+    .then(function (r) {
+      S.renting = false; S.mut++;
+      S.result = r; S.picked = []; S.reports = {}; S.catAt = 0;
+      if (S.home) S.home.itemsAvailable = null;
+      stack = []; go('rented');
+      loadCatalog(true).catch(function () { }); // 반납하기 화면에 바로 보이도록 뒤에서 새로 받는다
+    })
+    .catch(function (e) { S.renting = false; busy(btn, false); toast(e.message); });
+}
+
+/* ── 반납하기 ── */
+function toggleSel(rid, el) {
+  var i = S.sel.indexOf(rid);
+  if (i >= 0) S.sel.splice(i, 1); else S.sel.push(rid);
+  var on = S.sel.indexOf(rid) >= 0;
+  el.classList.toggle('on', on); el.setAttribute('aria-pressed', on);
+  var b = $('#retBtn');
+  b.disabled = !S.sel.length;
+  b.textContent = S.sel.length ? '제자리에 돌려놓았어요' : '골라 주세요';
+}
+function submitReturn(btn) {
+  busy(btn, true); S.mut++;
+  call('requestReturn', { rentalIds: S.sel })
+    .then(function (r) {
+      S.mut++;
+      if (S.cat) S.cat.mine = r.mine;
+      if (S.home) { S.home.rentMine = r.mine; store.set('home', S.home); }
+      S.sel = []; S.catAt = 0; stack = []; go('returned');
+    })
+    .catch(function (e) { busy(btn, false); toast(e.message); });
+}
+
+/* ── 강의실 예약 ── */
+function hh(h) { return (h < 10 ? '0' : '') + h + ':00'; }
+var WEEK = ['일', '월', '화', '수', '목', '금', '토'];
+function parseYmd(s) { var t = s.split('-').map(Number); return new Date(t[0], t[1] - 1, t[2]); }
+function ymd(d) { return d.getFullYear() + '-' + (d.getMonth() < 9 ? '0' : '') + (d.getMonth() + 1) + '-' + (d.getDate() < 10 ? '0' : '') + d.getDate(); }
+function dayLabel(s) { var d = parseYmd(s); return (d.getMonth() + 1) + '월 ' + d.getDate() + '일 (' + WEEK[d.getDay()] + ')'; }
+function takenMap(date) {
+  var m = {};
+  (S.room.booked || []).forEach(function (b) { if (b.date === date) for (var h = b.start; h < b.end; h++) m[h] = true; });
+  return m;
+}
+function hourPassed(date, h) {
+  var r = S.room;
+  if (date !== r.today) return false;
+  return h + 1 <= r.nowHour; // 그 시간이 이미 끝났다
+}
+function freeCount(date) {
+  var r = S.room, t = takenMap(date), n = 0, total = r.end - r.start;
+  var d = parseYmd(date).getDay();
+  if (!r.weekend && (d === 0 || d === 6)) return { free: 0, total: total };
+  for (var h = r.start; h < r.end; h++) if (!t[h] && !hourPassed(date, h)) n++;
+  return { free: n, total: total };
+}
+function roomLeadText(r) { return '1시간 단위 · ' + hh(r.start) + '~' + hh(r.end) + (r.weekend ? '' : ' · 평일만'); }
+function loadRoom(silent) {
+  return once('roomInfo', function () { return call('roomInfo'); }).then(function (r) {
+    var prev = S.room && JSON.stringify(S.room.booked) + S.room.nowHour + S.room.until;
+    S.room = r;
+    if (!S.month) S.month = r.today.slice(0, 7);
+    if (S.day && (S.day < r.today || S.day > r.until)) { S.day = null; S.range = null; }
+    if (S.range && S.day) {
+      var t = takenMap(S.day), clash = false;
+      for (var h = S.range.start; h < S.range.end; h++) if (t[h] || hourPassed(S.day, h)) clash = true;
+      if (clash) { S.range = null; toast('고른 시간이 방금 예약됐어요. 다시 골라 주세요'); }
+    }
+    if (!$('#cal')) return;
+    $('#roomTitle').textContent = r.room;
+    $('#roomLead').textContent = roomLeadText(r);
+    if (silent && prev === JSON.stringify(r.booked) + r.nowHour + r.until) return; // 바뀐 게 없으면 다시 그리지 않는다
+    renderGroup(); renderRoom();
+  });
+}
+/* 인원 고르기: 2명 → 하루 2시간까지, 3명 이상 → 3시간까지 */
+function maxHours() { var r = S.room; return S.group === 2 ? r.maxTwo : r.maxPer; }
+function renderGroup() {
+  var r = S.room, seg = $('#groupSeg'); if (!seg) return;
+  var opt = function (g, label, sub) {
+    return '<button class="' + (S.group === g ? 'on' : '') + '" aria-pressed="' + (S.group === g) + '" onclick="setGroup(' + g + ')"><b>' + label + '</b><small>' + sub + '</small></button>';
+  };
+  seg.innerHTML = (r.minPeople <= 2 ? opt(2, '2명', '하루 ' + r.maxTwo + '시간까지') : '') + opt(3, '3명 이상', '한 번에 ' + r.maxPer + '시간까지');
+}
+function setGroup(g) {
+  S.group = g; S.people = g === 2 ? '2' : '';
+  if (S.range && S.range.end - S.range.start > maxHours()) { S.range = null; toast('2명은 ' + maxHours() + '시간까지라 시간을 다시 골라 주세요'); }
+  renderGroup(); renderDay();
+}
+function renderRoom() {
+  var r = S.room;
+  var months = [], d0 = parseYmd(r.today), last = parseYmd(r.until);
+  for (var m = new Date(d0.getFullYear(), d0.getMonth(), 1); m <= last; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) months.push(ymd(m).slice(0, 7));
+  if (months.indexOf(S.month) < 0) S.month = months[0];
+  $('#months').innerHTML = months.map(function (mm) {
+    return '<button class="' + (mm === S.month ? 'on' : '') + '" onclick="S.month=\'' + mm + '\';renderRoom()">' + Number(mm.slice(5)) + '월</button>';
+  }).join('');
+  $('#openNote').textContent = r.openNote;
+  var first = parseYmd(S.month + '-01'), y = first.getFullYear(), mo = first.getMonth();
+  var cells = '';
+  for (var i = 0; i < first.getDay(); i++) cells += '<span></span>';
+  var dim = new Date(y, mo + 1, 0).getDate();
+  for (var dd = 1; dd <= dim; dd++) {
+    var ds = ymd(new Date(y, mo, dd));
+    var inWin = ds >= r.today && ds <= r.until;
+    var fc = inWin ? freeCount(ds) : { free: 0, total: 1 };
+    var cls = 'day' + (ds === r.today ? ' today' : '') + (ds === S.day ? ' on' : '') + (inWin && fc.free === 0 ? ' full' : '');
+    cells += '<button class="' + cls + '" ' + (inWin ? '' : 'disabled') + ' onclick="pickDay(\'' + ds + '\')" aria-label="' + dayLabel(ds) + (inWin ? ' 빈 시간 ' + fc.free + '칸' : '') + '">' +
+      dd + '<i><em style="width:' + (inWin ? Math.round(fc.free / fc.total * 100) : 0) + '%"></em></i></button>';
+  }
+  $('#cal').innerHTML = '<div class="wk">' + WEEK.map(function (w) { return '<span>' + w + '</span>'; }).join('') + '</div>' +
+    '<div class="days">' + cells + '</div><div class="legend"><span><i></i>빈 시간</span></div>';
+  renderDay();
+}
+function pickDay(ds) {
+  if (S.day !== ds) S.range = null;
+  S.day = ds; renderRoom();
+  setTimeout(function () { var b = $('#dayBox'); if (b) b.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'start' }); }, 30);
+}
+function renderDay() {
+  var box = $('#dayBox'), btn = $('#bookBtn'); if (!box) return;
+  var r = S.room;
+  if (!S.day) { box.innerHTML = ''; btn.disabled = true; btn.textContent = '날짜와 시간을 골라 주세요'; return; }
+  var d = parseYmd(S.day).getDay();
+  var closed = !r.weekend && (d === 0 || d === 6);
+  var t = takenMap(S.day), g = S.range;
+  var html = '<div class="h2" style="margin-top:22px">' + dayLabel(S.day) + '</div>';
+  if (closed) html += '<div class="card empty">주말에는 예약할 수 없어요</div>';
+  else {
+    html += '<div class="slots">';
+    for (var h = r.start; h < r.end; h++) {
+      var past = hourPassed(S.day, h), taken = t[h];
+      var on = g && h >= g.start && h < g.end;
+      html += '<button class="slot' + (on ? ' on' : '') + '" ' + (past || taken ? 'disabled' : '') + ' onclick="pickHour(' + h + ')">' +
+        '<b>' + hh(h) + '</b><small>' + (taken ? '예약됨' : past ? '지남' : '~' + hh(h + 1)) + '</small></button>';
+    }
+    html += '</div><p class="hint">시작과 끝 시간을 차례로 눌러요</p>';
+  }
+  box.innerHTML = html;
+  btn.disabled = !g || !S.group;
+  btn.textContent = !S.group ? '몇 명이 쓰는지 골라 주세요' : g ? hh(g.start) + '~' + hh(g.end) + ' · ' + (g.end - g.start) + '시간 예약' : '시간을 골라 주세요';
+}
+function pickHour(h) {
+  if (!S.group) { toast('먼저 몇 명이 쓰는지 골라 주세요'); var gs = $('#groupSeg'); if (gs) gs.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  var g = S.range, t = takenMap(S.day), mx = maxHours();
+  var single = { start: h, end: h + 1 };
+  if (!g) S.range = single;
+  else if (h >= g.start && h < g.end) S.range = (g.end - g.start === 1) ? null : single;
+  else {
+    var lo = Math.min(g.start, h), hi = Math.max(g.end, h + 1), freeAll = true;
+    for (var k = lo; k < hi; k++) if (t[k] || hourPassed(S.day, k)) freeAll = false;
+    if (freeAll && hi - lo <= mx) S.range = { start: lo, end: hi };
+    else { S.range = single; if (freeAll) toast(S.group === 2 ? '2명은 하루 ' + mx + '시간까지 예약할 수 있어요' : '한 번에 ' + mx + '시간까지 예약할 수 있어요'); }
+  }
+  renderDay();
+}
+function stepPeople(d) {
+  var el = $('#k_people'), cap = (S.room && S.room.cap) || 30, min3 = Math.max(3, (S.room && S.room.minPeople) || 2);
+  var v = Math.min(cap, Math.max(min3, (parseInt(el.value, 10) || 0) + d));
+  el.value = v; S.people = String(v);
+}
+function submitRoom(btn) {
+  var cap = (S.room && S.room.cap) || 30, two = S.group === 2;
+  var people = two ? 2 : parseInt($('#k_people').value, 10), min3 = Math.max(3, (S.room && S.room.minPeople) || 2);
+  if (!two && !(people >= 1)) { toast('사용 인원을 적어 주세요'); return $('#k_people').focus(); }
+  if (!two && people < min3) { toast('2명이면 앞 화면에서 [2명]을 골라 주세요'); return $('#k_people').focus(); }
+  if (people > cap) { toast('이 강의실은 ' + cap + '명까지 쓸 수 있어요'); return $('#k_people').focus(); }
+  busy(btn, true); S.mut++;
+  call('roomBook', { date: S.day, start: S.range.start, end: S.range.end, people: people, purpose: $('#k_purpose').value.trim() })
+    .then(function (r) { S.roomResult = r; S.range = null; S.roomMine = null; stack = []; go('roomDone'); loadRoom(true).catch(function () { }); })
+    .catch(function (e) {
+      busy(btn, false); toast(e.message);
+      if (/방금 다른 사람이|지난 시간/.test(e.message)) { S.range = null; loadRoom(true).catch(function () { }); }
+    });
+}
+function openRoomMine(btn) { if (S.roomMine === null && S.home && S.home.roomMine) S.roomMine = S.home.roomMine; go('roomMine'); }
+function roomChip(r) {
+  if (r.status === '예약확정') {
+    if (r.noPhoto) return '<span class="chip bad">사진 필요</span>';
+    if (r.started) return '<span class="chip warn">이용 중</span>';
+    return '<span class="chip g">예약확정</span>';
+  }
+  if (r.status === '퇴실확인중') return '<span class="chip warn">확인 중</span>';
+  if (r.status === '확인완료') return '<span class="chip ok">퇴실 완료</span>';
+  if (r.status === '원상복구 안 됨') return '<span class="chip bad">원상복구 안 됨</span>';
+  return '<span class="chip mute">' + esc(r.status) + '</span>';
+}
+function cancelRoom(rid, btn) {
+  ask('예약을 취소할까요?', '취소한 시간은 바로 다른 학우가 예약할 수 있어요.', '취소하기').then(function (yes) {
+    if (!yes) return;
+    busy(btn, true);
+    S.mut++;
+    call('roomCancel', { rid: rid })
+      .then(function (r) { toast('예약을 취소했어요'); S.roomMine = r.roomMine; noGhost = true; go('roomMine', false); loadRoom(true).catch(function () { }); })
+      .catch(function (e) { busy(btn, false); toast(e.message); });
+  });
+}
+function openCheckout(rid) {
+  S.roomTarget = (S.roomMine || []).filter(function (r) { return r.rid === rid; })[0];
+  S.photos = [];
+  go('checkout');
+  if (!S.room) loadRoom().then(function () { if (stack[stack.length - 1] === 'checkout') { noGhost = true; go('checkout', false); } }).catch(function () { });
+}
+function photoSlots() {
+  var slots = '';
+  for (var i = 0; i < 3; i++) {
+    slots += S.photos[i]
+      ? '<div class="ph"><img src="' + S.photos[i] + '" alt="올릴 사진 ' + (i + 1) + '"><button class="x" aria-label="사진 빼기" onclick="dropPhoto(' + i + ')">' + I.close + '</button></div>'
+      : (i === S.photos.length ? '<label class="ph add">' + I.cam + '사진 ' + (i + 1) + (i === 0 ? ' (필수)' : '') +
+        '<input type="file" accept="image/*" class="hide" onchange="addPhotos(this)" multiple></label>' : '<div class="ph" style="background:var(--card2);box-shadow:none"></div>');
+  }
+  return slots;
+}
+function outLabel() { return S.photos.length ? '사진 ' + S.photos.length + '장 올리고 퇴실 완료' : '사진을 1장 이상 올려 주세요'; }
+/* 사진을 넣고 뺄 때는 사진 칸과 버튼만 바꾼다 */
+function paintPhotos() {
+  var box = $('#photoBox'), b = $('#outBtn');
+  if (box) box.innerHTML = photoSlots();
+  if (b) { b.disabled = !S.photos.length; b.textContent = outLabel(); }
+}
+function addPhotos(input) {
+  var files = Array.prototype.slice.call(input.files || []).slice(0, 3 - S.photos.length);
+  if (!files.length) return;
+  Promise.all(files.map(shrinkPhoto)).then(function (urls) {
+    S.photos = S.photos.concat(urls).slice(0, 3);
+    if ((input.files || []).length > files.length) toast('사진은 3장까지 올릴 수 있어요');
+    paintPhotos();
+  }).catch(function (e) { toast(e.message); });
+}
+function dropPhoto(i) { S.photos.splice(i, 1); paintPhotos(); }
+function submitCheckout(btn) {
+  busy(btn, true); S.mut++;
+  call('roomCheckout', { rid: S.roomTarget.rid, photos: S.photos })
+    .then(function () { S.photos = []; S.roomMine = null; stack = []; go('checkedOut'); })
+    .catch(function (e) { busy(btn, false); toast(e.message); });
+}
+
+/* ── 건의 ── */
+function pickCat(c, el) { S.sgCat = c; $$('.cat').forEach(function (b) { b.classList.toggle('on', b === el); }); }
+function setAnon(a) {
+  S.anon = a; $('#anonY').classList.toggle('on', a); $('#anonN').classList.toggle('on', !a); renderAnon();
+}
+function renderAnon() {
+  var box = $('#anonBox'); if (!box) return;
+  box.innerHTML = S.anon
+    ? '<div class="note info" style="margin-top:0"><b class="mk">i</b><div>이름·학번은 저장하지 않아요. 보낸 뒤 나오는 <b>접수번호</b>로 답변을 봐요.</div></div>'
+    : '<div class="note info" style="margin-top:0"><b class="mk">i</b><div><b>' + esc(S.me.name) + '</b> 이름으로 보내고, 답변은 <b>' + esc(S.me.email) + '</b>(으)로도 알려 드려요.</div></div>';
+}
+function submitSuggest(btn) {
+  var text = $('#sg_text').value.trim();
+  if (!S.sgCat) return toast('어떤 건의인지 골라 주세요');
+  if (text.length < 5) { toast('내용을 5자 이상 적어 주세요'); return $('#sg_text').focus(); }
+  busy(btn, true);
+  call('suggest', { category: S.sgCat, content: text, anonymous: S.anon }).then(function (r) {
+    var codes = store.get('codes') || []; codes.unshift(r.code); store.set('codes', codes.slice(0, 20));
+    S.sgResult = r; S.sgText = ''; S.sgCat = null; stack = []; go('sgDone');
+  }).catch(function (e) { busy(btn, false); toast(e.message); });
+}
+function copyText(t) {
+  try { navigator.clipboard.writeText(t).then(function () { toast('복사했어요'); }, function () { toast('번호를 길게 눌러 복사해 주세요'); }); }
+  catch (e) { toast('번호를 길게 눌러 복사해 주세요'); }
+}
+function loadCodes(codes) {
+  var box = $('#sgList');
+  if (!codes.length) { box.innerHTML = '<div class="card" style="margin-top:14px">' + oops('이 휴대폰으로 보낸 건의가 없어요. 접수번호가 있다면 위에서 찾아 주세요.', 'default') + '</div>'; return Promise.resolve(); }
+  return call('suggestStatus', { codes: codes }).then(function (list) {
+    // 본 답변은 홈의 '새 답변'에서 뺀다
+    var seen = store.get('seenAns') || [];
+    list.forEach(function (s) { if (s.answer && seen.indexOf(s.code) < 0) seen.push(s.code); });
+    store.set('seenAns', seen.slice(-40));
+    box.innerHTML = list.length ? list.map(function (s) {
+      var done = s.status === '완료';
+      return '<div class="sg"><div class="row"><span class="chip mute">' + esc(s.category) + '</span><span class="meta grow">' + esc(s.code) + ' · ' + esc(s.at) + '</span>' +
+        '<span class="chip ' + (done ? 'ok' : 'mute') + '">' + (done ? (s.answer ? '답변 완료' : '처리 완료') : '답변 기다리는 중') + '</span></div>' +
+        '<div class="txt">' + esc(s.content) + '</div>' +
+        (s.answer ? '<div class="answer"><b>학생회 답변</b>' + esc(s.answer) + '</div>' : '') + '</div>';
+    }).join('') : '<div class="card empty" style="margin-top:14px">찾는 건의가 없어요</div>';
+  }).catch(function (e) { box.innerHTML = '<div class="card empty">' + esc(e.message) + '</div>'; });
+}
+function findCode(btn) {
+  var c = $('#sg_find').value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (c.length !== 6) return toast('접수번호 6자리를 적어 주세요');
+  busy(btn, true);
+  call('suggestStatus', { codes: [c] }).then(function (l) {
+    busy(btn, false);
+    if (!l.length) return toast('그 번호의 건의가 없어요');
+    var codes = store.get('codes') || [];
+    if (codes.indexOf(c) < 0) { codes.unshift(c); store.set('codes', codes.slice(0, 20)); }
+    loadCodes(store.get('codes') || [c]);
+  }).catch(function (e) { busy(btn, false); toast(e.message); });
+}
+
+/* ── 혜택 ── */
+function linksHtml(g) {
+  return g.length ? g.map(function (grp) {
+    return '<div class="h2">' + esc(grp.group) + '</div><div class="list">' + grp.items.map(function (l) {
+      return '<a class="lk" href="' + esc(l.url) + '" target="_blank" rel="noopener noreferrer"><div class="grow"><div class="nm">' + esc(l.name) + '</div>' +
+        (l.desc ? '<div class="ds">' + esc(l.desc) + '</div>' : '') + '</div><span class="ext" aria-hidden="true">' + I.ext + '</span></a>';
+    }).join('') + '</div>';
+  }).join('') : '<div class="card empty">아직 등록된 링크가 없어요</div>';
+}
+
+/* ── 사용 설명서 (? 아이콘) ── */
+var HELP_OF = { login: 'account', signup: 'account', forgot: 'account', forgotSent: 'account', reset: 'account', resetDone: 'account', profile: 'account', home: 'start',
+  rent: 'rent', pick: 'rent', rented: 'rent', mine: 'rent', returned: 'rent',
+  room: 'room', roomForm: 'room', roomDone: 'room', roomMine: 'room', checkout: 'room', checkedOut: 'room',
+  suggest: 'suggest', sgDone: 'suggest', sgMine: 'suggest', links: 'links' };
+function helpSections() {
+  var h = S.home || {}, n = function (v, d) { return v != null && v !== '' ? v : d; };
+  var days = n(h.rentDays, 7), maxP = n(h.maxPerPerson, 3), loc = h.location || '보관 장소';
+  var rs = n(h.roomStart, 9), re = n(h.roomEnd, 22), rmax = n(h.roomMaxPer, 3), rday = n(h.roomMaxDay, 3), od = n(h.openDay, 1);
+  var lim = n(h.lateLimit, 3), bd = n(h.banDays, 7);
+  var room = h.roomName || '북악관 1005호';
+  return [
+    { key: 'start', title: '바탕화면은 어떤 곳인가요?', html:
+      '<p>교육학과 학우를 위한 한 화면이에요. 과방·강의실에 붙은 QR 하나로 네 가지를 할 수 있어요.</p>' +
+      '<ul><li><b>물품대여</b> 전공서적·복지물품 빌리고 반납하기</li><li><b>강의실 예약</b> ' + esc(room) + ' 시간 단위 예약</li>' +
+      '<li><b>건의</b> 학생회에 건의하기(익명 가능)</li><li><b>혜택</b> 학교 시스템·대학생 혜택 바로가기</li></ul>' +
+      '<div class="tip">물품대여는 학생회비 납부자에게만 보여요. 납부했는데 안 보이면 학생회에 문의해 주세요.</div>' },
+    { key: 'rent', title: '물품대여', html:
+      '<p><b>빌리기</b></p><ol><li>[빌리기]에서 물품을 골라요. 한 사람이 동시에 ' + maxP + '개까지예요.</li>' +
+      '<li><b>물품 상태가 어떤가요?</b> 창에서 물품을 살펴보고 골라요. <b>자리에 없어요</b>나 <b>파손됐어요</b>(어디가 어떻게 파손됐는지 적기)면 그 물품은 빼고 빌리고, 학생회가 확인해요.</li>' +
+      '<li>[빌릴게요]를 누르면 끝. 물품에 붙은 번호(B-001, W-001)가 화면과 같은지 보고 가져가요.</li></ol>' +
+      '<p><b>반납 기한</b></p><ul><li>물품마다 달라요: <b>당일 반납</b>(그날 23:59), <b>익일 반납</b>(다음 날 23:59), 전공서적은 보통 <b>' + days + '일</b>.</li><li>목록에서 물품 이름 아래에 적혀 있어요. 빌리면 메일로도 와요.</li></ul>' +
+      '<p><b>반납하기</b></p><ol><li>물품을 ' + esc(loc) + '에 돌려놓아요.</li><li>[반납하기] → 돌려놓은 물품을 골라 [제자리에 돌려놓았어요].</li><li>학생회가 확인하면 메일이 와요.</li></ol>' +
+      '<p><b>대여 정지</b></p><ul><li>이번 학기 연체 횟수가 <b>' + lim + '회</b>가 되면 ' + bd + '일 동안 빌릴 수 없어요. 학기가 바뀌거나 정지가 끝나면 0회부터 다시 세요.</li>' +
+      '<li>분실하거나, 내가 쓴 뒤 파손·분실 신고가 들어와 학생회가 확인하면 ' + bd + '일 동안 빌릴 수 없어요.</li><li>정지 중에도 반납은 할 수 있어요.</li></ul>' },
+    { key: 'room', title: '강의실 예약', html:
+      '<ol><li><b>몇 명이 쓰는지</b> 골라요. 팀 활동용이라 <b>2명부터</b> 예약할 수 있어요.<br>2명: 하루 ' + n(h.roomMaxTwo, 2) + '시간까지 · 3명 이상: 한 번에 ' + rmax + '시간(하루 ' + rday + '시간)까지</li>' +
+      '<li>날짜를 눌러요. 날짜 아래 막대가 길수록 빈 시간이 많아요.</li><li>시작 시간과 끝 시간을 차례로 눌러요. ' + pad(rs) + ':00~' + pad(re) + ':00 사이예요.</li>' +
+      '<li>3명 이상이면 사용 인원(최대 ' + n(h.roomCap, 30) + '명)을 적고 예약하면 바로 확정돼요. 확정 메일이 와요.</li></ol>' +
+      '<p><b>다 쓴 뒤에는</b> 원래 상태로 정리하고 [내 예약] → [퇴실 사진 올리기]에서 사진 1~3장을 올려요.</p>' +
+      '<div class="tip">매달 ' + od + '일에 다음 달 예약이 열려요. 취소는 시작 전까지 [내 예약]에서 할 수 있어요. 사진을 올리지 않거나 원상복구가 안 되면 예약이 한동안 중지될 수 있어요.</div>' },
+    { key: 'suggest', title: '건의', html:
+      '<ol><li>어떤 건의인지 골라요: 해 주세요 · 불편해요 · 기능 추가 · 버그 신고 · 기타</li><li>내용을 적고 익명 또는 실명을 골라 보내요.</li></ol>' +
+      '<p><b>익명</b>이면 이름·학번을 전혀 저장하지 않아요. 보낸 뒤 나오는 <b>접수번호 6자리</b>로 답변을 봐요.</p>' +
+      '<p><b>실명</b>이면 내 이름으로 보내고, 답변을 가입한 이메일로도 알려 드려요.</p>' },
+    { key: 'links', title: '혜택', html: '<p>국민대 시스템(강의실 대여, 학식, 셔틀, 도서관 DB 등)과 대학생 할인·AI 도구 혜택을 모아 두었어요.</p>' },
+    { key: 'account', title: '로그인·회원가입', html:
+      '<ol><li><b>처음이면 회원가입</b>: 학번·이름·비밀번호(숫자 6자리)·이메일·전화번호를 한 번만 적어요.</li>' +
+      '<li><b>다음부터는 학번과 비밀번호</b>만 넣으면 돼요.</li><li><b>로그인 상태 유지</b>를 켜 두면 로그아웃할 때까지 다시 묻지 않아요.</li></ol>' +
+      '<p><b>비밀번호를 잊었다면</b> 로그인 화면의 [비밀번호를 잊었어요] → 가입한 이메일로 온 버튼을 30분 안에 눌러 새로 정해요.</p>' +
+      '<p>연락처 수정과 로그아웃은 홈 오른쪽 위 <b>내 이름</b>을 눌러요.</p>' }
+  ];
+}
+function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+var VIEW_NAME = { home: '홈', rent: '물품대여', pick: '물품 고르기', rented: '대여 완료', mine: '반납 고르기', returned: '반납 완료',
+  room: '강의실 예약', roomForm: '예약 정보 입력', roomDone: '예약 완료', roomMine: '내 예약', checkout: '퇴실 사진', checkedOut: '퇴실 완료',
+  suggest: '건의', sgDone: '건의 완료', sgMine: '내 건의', links: '혜택',
+  intro: '인트로', login: '로그인', signup: '회원가입', forgot: '비밀번호 찾기', forgotSent: '재설정 메일 보냄', reset: '비밀번호 다시 정하기', resetDone: '비밀번호 변경 완료', profile: '내 정보' };
+setupHelp(helpSections, function () { return HELP_OF[stack[stack.length - 1]] || 'start'; },
+  function () { var v = stack[stack.length - 1]; return (VIEW_NAME[v] || v || '홈') + (v === 'room' && S.day ? ' (' + S.day + ')' : ''); });
+
+/* ───────── 로그인 · 회원가입 · 비밀번호 재설정 · 내 정보 ───────── */
+function numField(id, label, max, ph, extra) {
+  return '<label class="field"><span>' + label + '</span><input id="' + id + '" inputmode="numeric" pattern="[0-9]*" maxlength="' + max + '" placeholder="' + ph + '" autocomplete="off"' +
+    ' oninput="digitsOnly(this,' + max + ')"' + (extra || '') + '></label>';
+}
+Object.assign(VIEWS, {
+  login: function () {
+    var last = store.get('lastSid') || '';
+    return '<div class="login">' +
+      '<div class="login-hero">' + logoHw(260, 'login-logo') +
+      '<div class="parade" aria-hidden="true">' +
+      taang('book', 78, 'p1') + taang('room', 78, 'p2') + taang('hello', 118, 'p3') + taang('letter', 78, 'p4') + taang('point', 78, 'p5') +
+      '</div></div>' +
+      '<div class="card login-card">' +
+      numField('l_id', '학번', 8, '20261234', ' value="' + esc(last) + '" autocomplete="username"') +
+      '<label class="field"><span>비밀번호</span><input id="l_pw" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="current-password" oninput="digitsOnly(this,6)"></label>' +
+      '<button class="agree on keep" id="keep" aria-pressed="true" onclick="this.classList.toggle(\'on\');this.setAttribute(\'aria-pressed\',this.classList.contains(\'on\'))"><span class="check">' + I.check + '</span><div><b>로그인 상태 유지</b></div></button>' +
+      '<button class="btn primary" id="loginBtn" style="margin-top:14px" onclick="doLogin(this)">로그인</button>' +
+      '<div class="login-links"><button onclick="go(\'forgot\')">비밀번호를 잊었어요</button></div></div>' +
+      '<div class="join"><button class="btn soft" onclick="go(\'signup\')">회원가입</button></div>' +
+      '<p class="foot">' + esc(ORG) + '</p></div>';
+  },
+  signup: function () {
+    return topbar('회원가입') +
+      hero('처음 한 번만<br>적어 주세요', '다음부터는 학번과 비밀번호로 들어와요', 'guide') +
+      numField('s_id', '학번', 8, '20261234') +
+      '<label class="field"><span>이름</span><input id="s_name" autocomplete="name" maxlength="20" placeholder="김바탕"></label>' +
+      '<label class="field"><span>비밀번호 · 숫자 6자리</span><input id="s_pw" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="new-password" oninput="digitsOnly(this,6)"></label>' +
+      '<label class="field"><span>비밀번호 확인</span><input id="s_pw2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="new-password" oninput="digitsOnly(this,6)"></label>' +
+      '<label class="field"><span>이메일 · 안내 메일과 비밀번호 찾기에 써요</span><input id="s_email" type="email" inputmode="email" autocomplete="email" placeholder="name@kookmin.ac.kr"></label>' +
+      '<label class="field"><span>전화번호</span><input id="s_phone" inputmode="tel" autocomplete="tel" placeholder="010-0000-0000"></label>' +
+      '<div class="consent"><button class="agree" id="agree" aria-pressed="false" onclick="this.classList.toggle(\'on\');this.setAttribute(\'aria-pressed\',this.classList.contains(\'on\'))"><span class="check">' + I.check + '</span><div><b>개인정보 수집·이용에 동의해요 (필수)</b>' +
+      '<small>자세한 사항은 아래를 참고해 주세요</small></div></button>' +
+      '<details class="consent-more"><summary>자세히 보기</summary><table>' +
+      '<tr><th>수집 항목</th><td>학번, 이름, 이메일, 전화번호, 비밀번호(암호화해 저장)</td></tr>' +
+      '<tr><th>이용 목적</th><td>본인 확인과 로그인, 학생회비 납부 여부 확인, 물품대여·강의실 예약 관리, 반납·예약·건의 안내 메일, 비밀번호 재설정</td></tr>' +
+      '<tr><th>보관 기간</th><td>탈퇴를 요청하거나 졸업할 때까지. 대여·예약 기록은 학기가 끝나면 정리해요</td></tr>' +
+      '<tr><th>보관 곳</th><td>교육학과 학생회 \'바탕\' 공용 구글 계정의 시트(학생회 임원만 열람)</td></tr>' +
+      '</table></details></div>' +
+      bottom('<button class="btn primary" id="signupBtn" onclick="doSignup(this)">가입하기</button>');
+  },
+  forgot: function () {
+    return topbar('비밀번호 찾기') +
+      hero('비밀번호를<br>잊었나요?', '가입한 이메일로 새로 정하는 링크를 보내 드려요', 'thinking') +
+      numField('f_id', '학번', 8, '20261234', ' value="' + esc(store.get('lastSid') || '') + '"') +
+      bottom('<button class="btn primary" onclick="doForgot(this)">재설정 메일 받기</button>');
+  },
+  forgotSent: function () {
+    return '<div class="done">' + taang('letter', 168) +
+      '<h1 class="title" style="margin-top:14px">메일을 보냈어요</h1>' +
+      '<p class="lead" style="margin:0"><b>' + esc(S.forgotMail) + '</b></p>' +
+      '<p class="lead" style="margin-top:8px">30분 안에 메일 속 [비밀번호 다시 정하기]를 눌러 주세요.<br>메일이 안 보이면 스팸함도 확인해 주세요.</p></div>' +
+      bottom('<button class="btn primary" onclick="stack=[];go(\'login\')">로그인으로</button>');
+  },
+  reset: function () {
+    return '<div class="top"><span></span></div>' +
+      hero('새 비밀번호<br>정하기', '숫자 6자리로 정해 주세요', 'guide') +
+      '<label class="field"><span>새 비밀번호</span><input id="r_pw" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="new-password" oninput="digitsOnly(this,6)"></label>' +
+      '<label class="field"><span>새 비밀번호 확인</span><input id="r_pw2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="new-password" oninput="digitsOnly(this,6)"></label>' +
+      bottom('<button class="btn primary" onclick="doReset(this)">바꾸기</button>');
+  },
+  resetDone: function () {
+    return '<div class="done">' + taang('success', 168) +
+      '<h1 class="title" style="margin-top:14px">비밀번호를 바꿨어요</h1><p class="lead">새 비밀번호로 로그인해 주세요.<br>다른 기기의 로그인은 모두 풀렸어요.</p></div>' +
+      bottom('<button class="btn primary" onclick="stack=[];go(\'login\')">로그인하기</button>');
+  },
+  profile: function () {
+    var m = S.me;
+    return topbar('내 정보') +
+      hero(esc(m.name) + '님', esc(m.studentId) + ' · ' + (m.member ? '학생회비 납부자' : '학생회비 미납부'), m.member ? 'hello' : 'default') +
+      '<label class="field"><span>이메일</span><input id="p_email" type="email" inputmode="email" value="' + esc(m.email) + '"></label>' +
+      '<label class="field"><span>전화번호</span><input id="p_phone" inputmode="tel" value="' + esc(m.phone) + '"></label>' +
+      '<button class="btn soft" onclick="saveProfile(this)">연락처 저장</button>' +
+      '<div class="row" style="margin-top:12px"><button class="btn line" onclick="pwByMail(this)">비밀번호 바꾸기</button><button class="btn line" onclick="logout()">로그아웃</button></div>' +
+      '<p class="foot">학번·이름을 바꾸려면 학생회에 문의해 주세요</p>';
+  }
+});
+
+function arrive(msg) {
+  stack = []; go('home');
+  document.body.classList.add('arrive'); setTimeout(function () { document.body.classList.remove('arrive'); }, 900);
+  toast(msg);
+}
+function doLogin(btn) {
+  var sid = $('#l_id').value, pw = $('#l_pw').value, keep = $('#keep').classList.contains('on');
+  if (sid.length !== 8) { toast('학번 8자리를 적어 주세요'); return $('#l_id').focus(); }
+  if (pw.length !== 6) { toast('비밀번호 6자리를 적어 주세요'); return $('#l_pw').focus(); }
+  busy(btn, true);
+  rawCall('login', { studentId: sid, password: pw }).then(function (r) {
+    store.set('lastSid', sid);
+    saveLogin(r.token, r.user, keep);
+    S.home = null;
+    leaveThen(function () { arrive(r.user.name + '님, 반가워요'); });
+  }).catch(function (e) { busy(btn, false); $('#l_pw').value = ''; toast(e.message); });
+}
+/* 지금 화면을 부드럽게 내보낸 뒤 다음 화면으로 */
+function leaveThen(next) {
+  if (reduceMotion()) return next();
+  var app = $('#app'); app.classList.add('leaving');
+  setTimeout(function () { app.classList.remove('leaving'); noGhost = true; next(); }, 320);
+}
+function doSignup(btn) {
+  var f = { studentId: $('#s_id').value, name: $('#s_name').value.trim(), password: $('#s_pw').value,
+    email: $('#s_email').value.trim(), phone: $('#s_phone').value.trim() };
+  if (f.studentId.length !== 8) { toast('학번 8자리를 적어 주세요'); return $('#s_id').focus(); }
+  if (f.name.length < 2) { toast('이름을 적어 주세요'); return $('#s_name').focus(); }
+  if (f.password.length !== 6) { toast('비밀번호를 숫자 6자리로 정해 주세요'); return $('#s_pw').focus(); }
+  if (f.password !== $('#s_pw2').value) { toast('비밀번호 확인이 달라요'); return $('#s_pw2').focus(); }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) { toast('이메일을 확인해 주세요'); return $('#s_email').focus(); }
+  if (!/^01\d{8,9}$/.test(f.phone.replace(/\D/g, ''))) { toast('전화번호를 확인해 주세요'); return $('#s_phone').focus(); }
+  if (!$('#agree').classList.contains('on')) return toast('개인정보 수집·이용 동의가 필요해요');
+  f.agree = true;
+  busy(btn, true);
+  rawCall('signup', f).then(function (r) {
+    store.set('lastSid', f.studentId);
+    saveLogin(r.token, r.user, true);
+    S.home = null;
+    leaveThen(function () { arrive('가입했어요. ' + r.user.name + '님, 반가워요'); });
+  }).catch(function (e) { busy(btn, false); toast(e.message); });
+}
+function doForgot(btn) {
+  var sid = $('#f_id').value;
+  if (sid.length !== 8) { toast('학번 8자리를 적어 주세요'); return $('#f_id').focus(); }
+  busy(btn, true);
+  rawCall('forgot', { studentId: sid }).then(function (r) { S.forgotMail = r.email; stack = ['login']; go('forgotSent'); })
+    .catch(function (e) { busy(btn, false); toast(e.message); });
+}
+function doReset(btn) {
+  var pw = $('#r_pw').value;
+  if (pw.length !== 6) { toast('비밀번호를 숫자 6자리로 정해 주세요'); return $('#r_pw').focus(); }
+  if (pw !== $('#r_pw2').value) { toast('비밀번호 확인이 달라요'); return $('#r_pw2').focus(); }
+  busy(btn, true);
+  rawCall('resetPw', { reset: S.resetTok, password: pw }).then(function (r) {
+    store.set('lastSid', r.studentId); clearLogin(); clearHash(); stack = []; go('resetDone');
+  }).catch(function (e) { busy(btn, false); toast(e.message); });
+}
+function saveProfile(btn) {
+  var email = $('#p_email').value.trim(), phone = $('#p_phone').value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('이메일을 확인해 주세요');
+  if (!/^01\d{8,9}$/.test(phone.replace(/\D/g, ''))) return toast('전화번호를 확인해 주세요');
+  busy(btn, true);
+  call('updateProfile', { email: email, phone: phone }).then(function (u) {
+    busy(btn, false); S.me = u; store.set('user', u); toast('저장했어요');
+  }).catch(function (e) { busy(btn, false); toast(e.message); });
+}
+function pwByMail(btn) {
+  busy(btn, true);
+  rawCall('forgot', { studentId: S.me.studentId }).then(function (r) { busy(btn, false); toast(r.email + '로 비밀번호 변경 메일을 보냈어요'); })
+    .catch(function (e) { busy(btn, false); toast(e.message); });
+}
+function logout() {
+  ask('로그아웃할까요?', '다시 쓰려면 학번과 비밀번호로 로그인해요.', '로그아웃').then(function (y) {
+    if (!y) return;
+    clearLogin(); leaveThen(function () { stack = []; go('login'); toast('로그아웃했어요'); });
+  });
+}
+
+/* 재설정 링크(#reset-…)로 들어왔는지 */
+function clearHash() { try { history.replaceState(history.state, '', location.pathname + location.search); } catch (e) { try { location.hash = ''; } catch (x) { } } }
+function readResetHash(cb) {
+  var pick = function (h) { var m = /^#?reset-([A-Za-z0-9]+)$/.exec(h || ''); cb(m ? m[1] : null); };
+  if (window.google && google.script && google.script.url) google.script.url.getLocation(function (loc) { pick(loc.hash); });
+  else pick(location.hash);
+}
+window.addEventListener('hashchange', function () { readResetHash(function (t) { if (t) { S.resetTok = t; stack = []; go('reset'); } }); });
+
+/*
+ * 처음 여는 학우를 위한 인트로 (이 휴대폰에서 한 번, 약 3.6초, 누르면 건너뜀)
+ * 로고처럼 그린·민트·흰 면이 쌓여 '바탕'이 깔리고 → 그 위에 '바탕화면' 로고가 드러나고 →
+ * 타앙이 다섯이 차례로 튀어나오고 → "교육학과 학우를 위한 한 화면" → 그대로 로그인 화면 제자리로 올라간다.
+ * 인트로는 로그인 화면 위에서 움직이는 것이라 끝나는 순간이 곧 로그인 화면이다.
+ */
+function startIntro() {
+  if (store.get('intro') || reduceMotion()) return false;
+  stack = ['login'];
+  noGhost = true;
+  document.body.classList.add('intro', 'intro-init'); // 로그인 화면이 한 번 보였다 사라지지 않게, 그리기 전에 인트로 상태로
+  $('#app').innerHTML = '<div class="fade">' + VIEWS.login() + '</div>';
+  document.body.classList.remove('authed');
+  var hero = $('.login-hero'), logo = $('.login-logo');
+  if (!hero || !logo) return false;
+  hero.insertAdjacentHTML('afterbegin', '<div class="intro-layers" aria-hidden="true"><span class="l1"></span><span class="l2"></span><span class="l3"></span></div>');
+  hero.insertAdjacentHTML('beforeend', '<p class="intro-tag" aria-hidden="true">교육학과 학우를 위한 한 화면</p>');
+  var layers = $('.intro-layers');
+  var place = function () {
+    hero.style.setProperty('--dy', '0px');
+    var lh = logo.getBoundingClientRect().height || 100;
+    layers.style.top = (logo.offsetTop - 16) + 'px'; layers.style.height = (lh + 32) + 'px';
+    var r = hero.getBoundingClientRect();
+    hero.style.setProperty('--dy', Math.max(0, Math.round(window.innerHeight / 2 - (r.top + r.height / 2) - 24)) + 'px');
+  };
+  place();
+  if (!logo.complete) logo.addEventListener('load', place, { once: true });
+  requestAnimationFrame(function () { place(); requestAnimationFrame(function () { document.body.classList.remove('intro-init'); }); });
+  var done = false, timers = [];
+  var finish = function () {
+    if (done) return; done = true;
+    timers.forEach(clearTimeout);
+    store.set('intro', 1);
+    document.body.classList.add('intro-out');
+    setTimeout(function () {
+      document.body.classList.remove('intro');
+      setTimeout(function () {
+        document.body.classList.remove('intro-out');
+        $$('.intro-layers, .intro-tag').forEach(function (x) { x.remove(); });
+      }, 800);
+    }, 260);
+    document.removeEventListener('pointerdown', skip, true);
+  };
+  var skip = function (e) { e.preventDefault(); e.stopPropagation(); finish(); };
+  document.addEventListener('pointerdown', skip, true);
+  timers.push(setTimeout(finish, 3300));
+  return true;
+}
+
+/* 시작: 재설정 링크 → (처음이면 인트로) → 로그인 / 저장된 정보로 홈을 바로 그리고 뒤에서 확인 */
+function boot() {
+  installBackTrap(sysBack);
+  readResetHash(function (t) {
+    if (t) { S.resetTok = t; stack = []; return go('reset'); }
+    if (!S.token) return window.startIntro && startIntro() ? null : go('login');
+    if (S.me && S.me.studentId) return go('home'); // AFTER.home이 뒤에서 새 정보를 받는다
+    $('#app').innerHTML = '<div class="done" style="padding-top:120px">' + taang('loading', 150) + '</div>';
+    refreshHome().then(function () { if (S.token) go('home'); });
+  });
+}
+boot();
