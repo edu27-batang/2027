@@ -130,7 +130,7 @@ function ghostOut(el, back) {
   Array.prototype.forEach.call(c.querySelectorAll('[id]'), function (x) { x.removeAttribute('id'); });
   c.style.cssText = 'position:absolute;margin:0;left:' + r.left + 'px;width:' + r.width + 'px;top:' + r.top + 'px';
   wrap.appendChild(c); document.body.appendChild(wrap);
-  setTimeout(function () { wrap.remove(); }, 420);
+  setTimeout(function () { wrap.remove(); }, 380);
 }
 
 /* 화면 안 확인 창 (confirm 대신) */

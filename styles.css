@@ -183,7 +183,7 @@ a.item{text-decoration:none;color:inherit}
 @keyframes sk{to{background-position:-200% 0}}
 .hide{display:none!important}
 .overlay{position:fixed;inset:0;background:rgba(22,38,39,.5);display:grid;place-items:center;padding:20px;z-index:40;animation:fade .18s ease}
-.sheet{background:var(--card);border-radius:24px;box-shadow:var(--sh2);width:100%;max-width:420px;padding:22px;max-height:calc(100vh - 40px);overflow:auto}
+.sheet{background:var(--card);border-radius:24px;box-shadow:var(--sh2);width:100%;max-width:420px;padding:22px;max-height:calc(100vh - 40px);max-height:calc(100dvh - 40px - env(safe-area-inset-top,0px));overflow:auto}
 :focus-visible{outline:2px solid var(--green);outline-offset:2px}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 
@@ -274,7 +274,8 @@ a.item{text-decoration:none;color:inherit}
 .done .taang{width:168px;margin-bottom:-6px;animation:pop .45s cubic-bezier(.2,1.4,.4,1)}
 .oops{display:flex;flex-direction:column;align-items:center;gap:4px;padding:22px 18px;text-align:center;color:var(--sub);font-size:15px}
 .oops .taang{width:110px}
-.overlay.help{align-items:end}
+.overlay.help{align-items:end;padding-top:calc(20px + env(safe-area-inset-top,0px));padding-bottom:max(12px,env(safe-area-inset-bottom,0px))}
+.overlay.help .sheet{max-height:calc(100vh - 70px);max-height:calc(100dvh - 40px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
 .help .sheet{max-width:480px;border-radius:24px;padding:18px 18px 22px}
 .help-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
 .help-head .taang{width:56px;flex:none}
@@ -428,15 +429,14 @@ body.arrive .tiles .tile:nth-child(4){animation-delay:.18s}
 /* ── V4: 화면 넘어갈 때 부드럽게 (이전 화면은 흐려지며 비켜나고, 새 화면은 반대쪽에서 들어온다) ── */
 /* 화면 전체(.fade)에 transform을 걸면 그동안 고정 버튼(.bottom)이 바닥에서 떨어진다 → 안쪽 요소마다 움직이고, 버튼 줄은 흐려지기만 */
 .fade{animation:none}
-.fade>*:not(.bottom){animation:navIn .55s cubic-bezier(.22,.7,.2,1) .12s backwards}
-.fade.back>*:not(.bottom){animation-name:navInBack}
-.fade>.bottom{animation:fadeOnly .45s ease .12s backwards}
+.fade>*:not(.bottom){animation:none}
+.fade>.bottom{animation:none}
 body.arrive #app .fade>*{animation:none}
 @keyframes navIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes fadeOnly{from{opacity:0}to{opacity:1}}
 @keyframes navInBack{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .nav-ghost *{pointer-events:none!important}
-.nav-ghost{position:fixed;inset:0;z-index:25;pointer-events:none;overflow:hidden;animation:navOut .4s ease forwards}
+.nav-ghost{position:fixed;inset:0;z-index:25;pointer-events:none;overflow:hidden;animation:navOut .36s ease-in-out forwards}
 .nav-ghost.back{animation-name:navOutBack}
 .nav-ghost .app{min-height:0}
 @keyframes navOut{to{opacity:0}}
