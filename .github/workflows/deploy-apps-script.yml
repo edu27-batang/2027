@@ -1,0 +1,42 @@
+name: Deploy Apps Script
+
+# main에 apps-script/ 파일이 바뀌어 올라오면 구글 시트의 Apps Script에 올리고,
+# 같은 배포 주소(/exec)를 새 버전으로 갱신한다. 주소는 바뀌지 않는다.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps-script/**'
+      - '.clasp.json'
+      - '.github/workflows/deploy-apps-script.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: clasp 설치
+        run: npm install -g @google/clasp
+
+      - name: 구글 인증 준비 (비밀 설정 CLASPRC_JSON 사용)
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ]; then echo "CLASPRC_JSON 비밀 값이 없어요"; exit 1; fi
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+
+      - name: 코드 올리기
+        run: clasp push --force
+
+      - name: 같은 배포 주소를 새 버전으로 갱신
+        env:
+          DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+        run: |
+          if [ -z "$DEPLOYMENT_ID" ]; then echo "APPS_SCRIPT_DEPLOYMENT_ID 비밀 값이 없어요"; exit 1; fi
+          clasp deploy --deploymentId "$DEPLOYMENT_ID" --description "auto ${GITHUB_SHA:0:7}"
