@@ -43,6 +43,7 @@ a{color:var(--green-deep)}
 .top .ttl{font-weight:700;font-size:17px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:16px;color:var(--sub)}
 .brand img{display:block;height:34px;width:auto}
+.brand img.top-logo{height:auto;width:132px;max-width:60vw}
 .icon-btn{width:44px;height:44px;border-radius:14px;display:grid;place-items:center;color:var(--ink);flex:none}
 .icon-btn:active{background:var(--mint-soft)}
 .icon-btn svg{width:24px;height:24px}
@@ -280,7 +281,7 @@ a.item{text-decoration:none;color:inherit}
 .overlay.help{align-items:end}
 .help .sheet{max-width:480px;border-radius:24px;padding:18px 18px 22px}
 .help-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-.help-head .taang{width:86px;flex:none}
+.help-head .taang{width:56px;flex:none}
 .help-head b{display:block;font-size:18px}
 .help-head small{display:block;color:var(--sub);font-size:13px}
 .help-sec{border-top:1px solid var(--line)}
@@ -308,7 +309,7 @@ a.item{text-decoration:none;color:inherit}
 .help-sec summary::after{transition:transform .25s ease}
 .help-sec[open]:not(.closing) summary::after{transform:rotate(180deg)}
 .bug{display:flex;align-items:center;gap:10px;margin-top:8px;padding-top:16px;border-top:1px solid var(--line)}
-.bug .taang{width:64px;flex:none}
+.bug .taang{width:48px;flex:none}
 .bug b{display:block;font-size:16px}
 .bug small{display:block;font-size:13px;color:var(--sub);line-height:1.5}
 .bug-done{font-size:13px;color:var(--good);font-weight:600}
@@ -431,18 +432,18 @@ body.arrive .tiles .tile:nth-child(4){animation-delay:.18s}
 /* ── V4: 화면 넘어갈 때 부드럽게 (이전 화면은 흐려지며 비켜나고, 새 화면은 반대쪽에서 들어온다) ── */
 /* 화면 전체(.fade)에 transform을 걸면 그동안 고정 버튼(.bottom)이 바닥에서 떨어진다 → 안쪽 요소마다 움직이고, 버튼 줄은 흐려지기만 */
 .fade{animation:none}
-.fade>*:not(.bottom){animation:navIn .32s cubic-bezier(.2,.8,.2,1) .08s backwards}
+.fade>*:not(.bottom){animation:navIn .4s cubic-bezier(.2,.8,.2,1) .06s backwards}
 .fade.back>*:not(.bottom){animation-name:navInBack}
 .fade>.bottom{animation:fade .28s ease .08s backwards}
 body.arrive #app .fade>*{animation:none}
-@keyframes navIn{from{opacity:0;transform:translateX(18px)}to{opacity:1;transform:none}}
+@keyframes navIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
 @keyframes navInBack{from{opacity:0;transform:translateX(-18px)}to{opacity:1;transform:none}}
 .nav-ghost *{pointer-events:none!important}
-.nav-ghost{position:fixed;inset:0;z-index:25;pointer-events:none;overflow:hidden;animation:navOut .16s ease-in forwards}
+.nav-ghost{position:fixed;inset:0;z-index:25;pointer-events:none;overflow:hidden;animation:navOut .3s ease-out forwards}
 .nav-ghost.back{animation-name:navOutBack}
 .nav-ghost .app{min-height:0}
-@keyframes navOut{to{opacity:0;transform:translateX(-18px)}}
-@keyframes navOutBack{to{opacity:0;transform:translateX(18px)}}
+@keyframes navOut{to{opacity:0;transform:translateX(-24px)}}
+@keyframes navOutBack{to{opacity:0;transform:translateX(24px)}}
 .overlay.closing{animation:overlayOut .2s ease forwards}
 .overlay.closing .sheet{transition:transform .2s ease;transform:translateY(14px)}
 @keyframes overlayOut{to{opacity:0}}
@@ -458,7 +459,7 @@ body.locked{overflow:hidden}
 
 /* 상단바 오른쪽: 화면별 버튼 + 사용 설명서(?) */
 .top-r{display:flex;align-items:center;gap:4px;flex:none}
-.help-btn{width:40px;height:40px;border-radius:12px;font-family:var(--display);font-size:21px;color:var(--green-deep);background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
+.help-btn{width:40px;height:36px;border-radius:12px;font-family:var(--display);font-size:21px;color:var(--green-deep);background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
 .help-btn:active{background:var(--mint-soft)}
 .home-sub{gap:8px}
 

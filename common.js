@@ -130,7 +130,7 @@ function ghostOut(el, back) {
   Array.prototype.forEach.call(c.querySelectorAll('[id]'), function (x) { x.removeAttribute('id'); });
   c.style.cssText = 'position:absolute;margin:0;left:' + r.left + 'px;width:' + r.width + 'px;top:' + r.top + 'px';
   wrap.appendChild(c); document.body.appendChild(wrap);
-  setTimeout(function () { wrap.remove(); }, 200);
+  setTimeout(function () { wrap.remove(); }, 320);
 }
 
 /* 화면 안 확인 창 (confirm 대신) */
@@ -218,7 +218,7 @@ function openHelp() {
   var secs = HELP.sections(), open = HELP.openKey ? HELP.openKey() : '';
   var m = document.createElement('div'); m.className = 'overlay help';
   m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-label="사용 설명서">' +
-    '<div class="help-head">' + taang('guide', 96) + '<div class="grow"><b>타앙이의 사용 설명서</b><small>궁금한 곳을 눌러 보세요</small></div>' +
+    '<div class="help-head">' + taang('guide', 56) + '<div class="grow"><b>타앙이의 사용 설명서</b><small>궁금한 곳을 눌러 보세요</small></div>' +
     '<button class="icon-btn" aria-label="닫기" data-x>' + I.close + '</button></div>' +
     secs.map(function (s) {
       return '<details class="help-sec"' + (s.key === open ? ' open' : '') + '><summary>' + s.title + '</summary><div class="help-body"><div class="help-in">' + s.html + '</div></div></details>';
