@@ -167,7 +167,7 @@ var VIEWS = {
         bottom('<button class="btn soft" onclick="home()">처음으로</button>');
     }
     var loc = (S.cat && S.cat.location) || (S.home && S.home.location) || '';
-    html += '<h1 class="title">무엇을 돌려놓았나요?</h1><p class="lead">' + esc(loc ? loc + '에 두고 골라 주세요' : '제자리에 두고 골라 주세요') + '</p>';
+    html += '<h1 class="title">무엇을 돌려놓았나요?</h1><p class="lead">' + esc(loc ? loc + '에 돌려놓고 골라 주세요' : '제자리에 돌려놓고 골라 주세요') + '</p>';
     if (open.length) {
       html += '<div class="list">' + open.map(function (r) {
         var on = S.sel.indexOf(r.rid) >= 0;
