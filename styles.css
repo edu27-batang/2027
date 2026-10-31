@@ -290,7 +290,7 @@ a.item{text-decoration:none;color:inherit}
 .help-body li{margin:2px 0}
 .help-body p{margin:4px 0 8px}
 .help-body .tip{background:var(--mint-soft);border-radius:10px;padding:8px 10px;font-size:13.5px;color:var(--green-deep);margin-top:6px}
-.help-head{position:sticky;top:-18px;z-index:2;background:var(--card);margin:-18px -18px 6px;padding:14px 18px 10px;border-radius:24px 24px 0 0;box-shadow:0 1px 0 var(--line)}
+.help-head{position:sticky;top:0;z-index:2;background:var(--card);margin:-18px -18px 6px;padding:14px 18px 10px;border-radius:24px 24px 0 0;box-shadow:0 1px 0 var(--line)}
 .stepper{display:flex;align-items:center;gap:8px}
 .stepper button{flex:none;width:54px;height:54px;border-radius:14px;background:var(--card);box-shadow:inset 0 0 0 1px var(--line);font-size:24px;font-weight:600;color:var(--green-deep)}
 .stepper button:active{background:var(--mint-soft)}
@@ -428,18 +428,19 @@ body.arrive .tiles .tile:nth-child(4){animation-delay:.18s}
 /* ── V4: 화면 넘어갈 때 부드럽게 (이전 화면은 흐려지며 비켜나고, 새 화면은 반대쪽에서 들어온다) ── */
 /* 화면 전체(.fade)에 transform을 걸면 그동안 고정 버튼(.bottom)이 바닥에서 떨어진다 → 안쪽 요소마다 움직이고, 버튼 줄은 흐려지기만 */
 .fade{animation:none}
-.fade>*:not(.bottom){animation:navIn .4s cubic-bezier(.2,.8,.2,1) .06s backwards}
+.fade>*:not(.bottom){animation:navIn .55s cubic-bezier(.22,.7,.2,1) .12s backwards}
 .fade.back>*:not(.bottom){animation-name:navInBack}
-.fade>.bottom{animation:fade .28s ease .08s backwards}
+.fade>.bottom{animation:fadeOnly .45s ease .12s backwards}
 body.arrive #app .fade>*{animation:none}
-@keyframes navIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:none}}
-@keyframes navInBack{from{opacity:0;transform:translateX(-18px)}to{opacity:1;transform:none}}
+@keyframes navIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes fadeOnly{from{opacity:0}to{opacity:1}}
+@keyframes navInBack{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .nav-ghost *{pointer-events:none!important}
-.nav-ghost{position:fixed;inset:0;z-index:25;pointer-events:none;overflow:hidden;animation:navOut .3s ease-out forwards}
+.nav-ghost{position:fixed;inset:0;z-index:25;pointer-events:none;overflow:hidden;animation:navOut .4s ease forwards}
 .nav-ghost.back{animation-name:navOutBack}
 .nav-ghost .app{min-height:0}
-@keyframes navOut{to{opacity:0;transform:translateX(-24px)}}
-@keyframes navOutBack{to{opacity:0;transform:translateX(24px)}}
+@keyframes navOut{to{opacity:0}}
+@keyframes navOutBack{to{opacity:0}}
 .overlay.closing{animation:overlayOut .2s ease forwards}
 .overlay.closing .sheet{transition:transform .2s ease;transform:translateY(14px)}
 @keyframes overlayOut{to{opacity:0}}
@@ -455,7 +456,7 @@ body.locked{overflow:hidden}
 
 /* 상단바 오른쪽: 화면별 버튼 + 사용 설명서(?) */
 .top-r{display:flex;align-items:center;gap:4px;flex:none}
-.help-btn{width:40px;height:36px;border-radius:12px;font-family:var(--display);font-size:21px;color:var(--green-deep);background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
+.help-btn{width:36px;height:36px;padding:0;display:grid;place-items:center;border-radius:12px;font-family:var(--display);font-size:21px;color:var(--green-deep);background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
 .help-btn:active{background:var(--mint-soft)}
 .home-sub{gap:8px}
 
