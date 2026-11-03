@@ -4,7 +4,7 @@
  *
  * 구조
  *  - 이 스크립트는 구글 시트에 붙어 있는(컨테이너 바인딩) Apps Script 프로젝트다.
- *  - 시트 11개: 설정 / 물품 / 납부자 / 혜택 (학생회가 채움) · 대여기록 / 물품신고 / 대여정지 / 예약 / 예약중지 / 건의 / 회원 (앱이 씀)
+ *  - 시트 12개: 설정 / 물품 / 납부자 / 혜택 (학생회가 채움) · 대여기록 / 물품신고 / 대여정지 / 예약 / 예약중지 / 건의 / 회원 / 관리기록 (앱이 씀)
  *  - 서버는 시트의 '열 이름'(1행)으로 칸을 찾는다. 열 순서를 바꾸거나 열을 끼워 넣어도 된다. 열 이름만 바꾸지 않으면 된다.
  *  - 화면을 띄우는 방법이 두 가지이고, 같은 코드로 둘 다 된다.
  *    (가) Apps Script 웹앱: doGet이 Index·Admin HTML을 보여 주고, 화면은 google.script.run으로 api()를 부른다.
@@ -15,8 +15,8 @@
 // ───────────────────────── 상수 ─────────────────────────
 var APP_NAME = '바탕화면';
 var SHEET = { SETTINGS: '설정', ITEMS: '물품', MEMBERS: '납부자', LINKS: '혜택',
-  RENTALS: '대여기록', REPORTS: '물품신고', RBANS: '대여정지', ROOMS: '예약', BANS: '예약중지', SUGGEST: '건의', USERS: '회원' };
-var SHEET_ORDER = ['설정', '물품', '납부자', '혜택', '대여기록', '물품신고', '대여정지', '예약', '예약중지', '건의', '회원'];
+  RENTALS: '대여기록', REPORTS: '물품신고', RBANS: '대여정지', ROOMS: '예약', BANS: '예약중지', SUGGEST: '건의', USERS: '회원', LOG: '관리기록' };
+var SHEET_ORDER = ['설정', '물품', '납부자', '혜택', '대여기록', '물품신고', '대여정지', '예약', '예약중지', '건의', '회원', '관리기록'];
 var INPUT_SHEETS = ['설정', '물품', '납부자', '혜택'];
 
 /* 각 시트의 열 이름. 새로 설치할 때 이 순서로 만든다. 사람이 보는 칸을 앞에, 앱만 쓰는 칸을 뒤에 둔다. */
@@ -34,6 +34,8 @@ HEADERS[SHEET.ROOMS] = ['상태', '날짜', '시작', '끝', '시간', '인원',
 HEADERS[SHEET.BANS] = ['상태', '학번', '이름', '시작일', '종료일', '사유', '처리일시'];
 HEADERS[SHEET.SUGGEST] = ['상태', '접수일시', '범주', '내용', '답변', '처리일시', '공개', '이름', '이메일', '접수번호'];
 HEADERS[SHEET.USERS] = ['학번', '이름', '이메일', '전화번호', '가입일시', '마지막로그인', '메모', '세션버전', '비밀번호(암호화)', '솔트'];
+/* 관리자 화면에서 한 일을 한 줄씩 남긴다(누가·언제·무엇을). 처음 기록할 때 시트가 생긴다 */
+HEADERS[SHEET.LOG] = ['일시', '처리자', '처리자 학번', '작업', '대상', '내용'];
 /* 학생회가 손으로 고쳐도 되는 칸(머리글 노랑). 나머지는 앱이 쓰는 칸(머리글 회색) */
 var EDITABLE = {};
 EDITABLE[SHEET.ITEMS] = ['물품번호', '구분', '이름', '설명', '반납 기한', '상태', '메모'];
@@ -46,6 +48,7 @@ EDITABLE[SHEET.ROOMS] = ['메모'];
 EDITABLE[SHEET.BANS] = ['상태'];
 EDITABLE[SHEET.SUGGEST] = [];
 EDITABLE[SHEET.USERS] = ['이름', '이메일', '전화번호', '메모', '세션버전'];
+EDITABLE[SHEET.LOG] = [];
 
 var ITEM_STATUS = { OK: '대여가능', OUT: '대여중', CHECK: '반납확인중', FIX: '점검중', OFF: '사용중지' };
 var RENT_STATUS = { OUT: '대여중', CHECK: '반납확인중', DONE: '반납완료', LOST: '분실' };
@@ -86,7 +89,7 @@ var SETTING_DEFAULTS = [
   ['출입 안내', '강의실은 열려 있어요. 예약한 시간에 바로 들어가면 돼요.', '예약 완료 화면과 메일에 나와요'],
   ['퇴실 안내', '아래 사진이 강의실의 원래 모습이에요. 이대로 정리하고 퇴실해 주세요. 기자재가 파손되거나 원상복구가 안 되면 다음 예약이 제한될 수 있어요.', '퇴실 화면의 원본 사진 위에 나와요'],
   ['■ 관리자', null, ''],
-  ['관리자 PIN', '0000', '관리자 화면 비밀번호. 꼭 바꿔 주세요(숫자 4자리 이상)'],
+  ['관리자 학번', '', '관리자 화면에 들어올 수 있는 학우의 학번. 여러 명이면 쉼표로 구분. 그 학우의 바탕화면 계정(학번·비밀번호)으로 들어와요'],
   ['관리자 이메일', '', '알림과 아침 요약을 받을 주소. 여러 명이면 쉼표로 구분(한 명마다 메일 한도 1통)'],
   ['관리자 즉시 알림', '사용', '사용 안 함이면 반납·신고·퇴실·건의 알림을 아침 요약 한 통으로만 받아요'],
   ['■ 건드리지 않는 값', null, '초기 설정이 채워요'],
@@ -145,16 +148,21 @@ function api(name, payload) {
     catalog: apiCatalog_, rent: apiRent_, mine: apiMine_, requestReturn: apiRequestReturn_,
     roomInfo: apiRoomInfo_, roomBook: apiRoomBook_, roomMine: apiRoomMine_, roomCancel: apiRoomCancel_, roomCheckout: apiRoomCheckout_,
     suggest: apiSuggest_, suggestStatus: apiSuggestStatus_, links: apiLinks_,
-    adminLogin: apiAdminLogin_, adminData: apiAdminData_, adminConfirm: apiAdminConfirm_, adminReject: apiAdminReject_,
+    emailCode: apiEmailCode_,
+    adminLogin: apiAdminLogin_, adminData: apiAdminData_,
+    adminMembers: apiAdminMembers_, adminMemberLogout: apiAdminMemberLogout_, adminMemberDelete: apiAdminMemberDelete_, adminConfirm: apiAdminConfirm_, adminReject: apiAdminReject_,
     adminItemStatus: apiAdminItemStatus_, adminRemind: apiAdminRemind_, adminMarkLost: apiAdminMarkLost_,
     adminReport: apiAdminReport_, adminMemo: apiAdminMemo_, adminRentUnban: apiAdminRentUnban_,
     adminRoomReview: apiAdminRoomReview_, adminRoomCancel: apiAdminRoomCancel_, adminRoomBan: apiAdminRoomBan_, adminRoomUnban: apiAdminRoomUnban_,
     adminSuggest: apiAdminSuggest_
   };
   settingsCache_ = null; // 요청마다 [설정]을 새로 읽는다
+  currentAdmin_ = null;
   try {
     if (!Object.prototype.hasOwnProperty.call(routes, name)) throw userError_('알 수 없는 요청입니다.');
-    return { ok: true, data: routes[name](payload || {}) };
+    var data = routes[name](payload || {});
+    if (currentAdmin_ && ADMIN_LOG_LABEL[name]) logAdmin_(name, payload || {}, data);
+    return { ok: true, data: data };
   } catch (err) {
     if (err && err.userFacing) return err.auth ? { ok: false, error: err.message, auth: true } : { ok: false, error: err.message };
     console.error(err && err.stack ? err.stack : err);
@@ -291,7 +299,8 @@ function readUsers_(t) {
   t = t || table_(SHEET.USERS);
   return t.rows.map(function (o) {
     return { row: o.row, studentId: String(o['학번']).replace(/\D/g, ''), name: String(o['이름']).trim(), email: String(o['이메일']).trim(),
-      phone: String(o['전화번호']).trim(), hash: String(o['비밀번호(암호화)']), salt: String(o['솔트']), ver: Number(o['세션버전']) || 1 };
+      phone: String(o['전화번호']).trim(), hash: String(o['비밀번호(암호화)']), salt: String(o['솔트']), ver: Number(o['세션버전']) || 1,
+      joined: o['가입일시'], lastLogin: o['마지막로그인'] };
   }).filter(function (u) { return u.studentId; });
 }
 function findUser_(sid) { return readUsers_().filter(function (u) { return u.studentId === sid; })[0] || null; }
@@ -442,6 +451,64 @@ function cleanEmail_(v) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw userError_('이메일을 확인해 주세요. 비밀번호를 잊었을 때 이 주소로 메일이 가요.');
   return e;
 }
+/* 가입·이메일 변경은 학교 메일(@kookmin.ac.kr)만 받는다 */
+var SCHOOL_MAIL_RE = /^[^\s@]+@kookmin\.ac\.kr$/i;
+function cleanSchoolEmail_(v) {
+  var e = cleanEmail_(v).toLowerCase();
+  if (!SCHOOL_MAIL_RE.test(e)) throw userError_('학교 메일(@kookmin.ac.kr)만 쓸 수 있어요.');
+  return e;
+}
+function sameEmail_(a, b) { return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase(); }
+
+/**
+ * 이메일 인증번호. 6자리 숫자를 메일로 보내고 10분 동안 캐시에만 둔다(시트에는 남기지 않는다).
+ * purpose: 'signup'(가입, studentId 필요) | 'change'(내 정보에서 이메일 바꾸기, token 필요)
+ */
+var CODE_TTL_ = 600, CODE_TRIES_ = 5;
+function codeKey_(purpose, sid, email) { return 'evc_' + purpose + '_' + sid + '_' + Utilities.base64EncodeWebSafe(email.toLowerCase()); }
+function newCode_6_() {
+  var hex = Utilities.getUuid().replace(/-/g, '');
+  return String(parseInt(hex.slice(0, 12), 16) % 1000000 + 1000000).slice(1);
+}
+function apiEmailCode_(p) {
+  var purpose = p.purpose === 'change' ? 'change' : 'signup', sid, name;
+  var email = cleanSchoolEmail_(p.email);
+  if (purpose === 'signup') {
+    sid = String(p.studentId || '').replace(/\D/g, '');
+    if (!SID_RE.test(sid)) throw userError_('학번 8자리를 확인해 주세요.');
+    if (findUser_(sid)) throw userError_(ALREADY_JOINED_);
+    name = String(p.name || '').trim() || '학우';
+  } else {
+    var u = authUser_(p);
+    if (sameEmail_(u.email, email)) throw userError_('지금 쓰는 이메일과 같아요.');
+    sid = u.studentId; name = u.name;
+  }
+  var cache = CacheService.getScriptCache(), wait = 'evw_' + sid;
+  if (cache.get(wait)) throw userError_('인증번호를 방금 보냈어요. 1분 뒤 다시 받을 수 있어요.');
+  var code = newCode_6_();
+  cache.put(codeKey_(purpose, sid, email), JSON.stringify({ code: code, tries: 0, exp: Date.now() + CODE_TTL_ * 1000 }), CODE_TTL_);
+  cache.put(wait, '1', 60);
+  var sent = safeMail_(email, '[' + APP_NAME + '] 이메일 인증번호 ' + code,
+    mailBody_(name + '님, 바탕화면 이메일 인증번호예요.', [{ html: '<b style="font-size:24px;letter-spacing:4px">' + code + '</b>' }],
+      '10분 안에 화면에 입력해 주세요. 내가 요청하지 않았다면 이 메일은 무시해 주세요.'));
+  if (!sent) throw userError_('메일을 보내지 못했어요. 잠시 뒤 다시 시도하거나 학생회에 문의해 주세요.');
+  return { email: email, ttl: CODE_TTL_ };
+}
+/** 맞으면 지우고 통과, 틀리면 횟수를 센다 */
+function checkCode_(purpose, sid, email, code) {
+  var cache = CacheService.getScriptCache(), key = codeKey_(purpose, sid, email);
+  var raw = cache.get(key), rec = null;
+  try { rec = raw ? JSON.parse(raw) : null; } catch (e) { rec = null; }
+  if (!rec || rec.exp < Date.now()) throw userError_('인증번호가 없거나 만료됐어요. 인증번호를 다시 받아 주세요.');
+  if (rec.tries >= CODE_TRIES_) throw userError_('인증번호를 여러 번 틀렸어요. 인증번호를 다시 받아 주세요.');
+  if (String(code || '').replace(/\D/g, '') !== rec.code) {
+    rec.tries++;
+    cache.put(key, JSON.stringify(rec), Math.max(1, Math.round((rec.exp - Date.now()) / 1000)));
+    throw userError_('인증번호가 맞지 않아요. (' + rec.tries + '/' + CODE_TRIES_ + ')');
+  }
+  cache.remove(key);
+}
+var ALREADY_JOINED_ = '이미 가입한 학번이에요. 로그인해 주세요. 본인이 가입하지 않았다면 학생회에 문의해 주세요.';
 
 /** payload: {studentId, name, password, email, phone, agree} → {token, user} */
 function apiSignup_(p) {
@@ -450,12 +517,14 @@ function apiSignup_(p) {
   if (!SID_RE.test(sid)) throw userError_('학번 8자리를 확인해 주세요.');
   if (name.length < 2 || name.length > 20) throw userError_('이름을 확인해 주세요.');
   if (!PW_RE.test(String(p.password || ''))) throw userError_('비밀번호는 숫자 6자리로 정해 주세요.');
-  var email = cleanEmail_(p.email), phone = cleanPhone_(p.phone);
+  var email = cleanSchoolEmail_(p.email), phone = cleanPhone_(p.phone);
   if (!p.agree) throw userError_('개인정보 수집·이용에 동의해야 가입할 수 있어요.');
+  if (!String(p.code || '').trim()) throw userError_('이메일 인증번호를 입력해 주세요.');
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
-    if (findUser_(sid)) throw userError_('이미 가입한 학번이에요. 로그인해 주세요.');
+    if (findUser_(sid)) throw userError_(ALREADY_JOINED_);
+    checkCode_('signup', sid, email, p.code);
     var salt = Utilities.getUuid().replace(/-/g, '').slice(0, 16);
     var now = new Date();
     table_(SHEET.USERS).append([{ '학번': sid, '이름': name, '이메일': email, '전화번호': phone, '비밀번호(암호화)': hashPw_(String(p.password), salt),
@@ -468,6 +537,12 @@ function apiSignup_(p) {
 
 /** payload: {studentId, password} → {token, user}. 5번 틀리면 10분 잠금 */
 function apiLogin_(p) {
+  var r = checkPassword_(p);
+  r.t.set(r.u.row, '마지막로그인', new Date());
+  return { token: makeToken_(r.u), user: profile_(r.u) };
+}
+/** 학번·비밀번호 확인(5번 틀리면 10분 잠금). 맞으면 {u, t} */
+function checkPassword_(p) {
   var sid = String(p.studentId || '').replace(/\D/g, '');
   if (!SID_RE.test(sid)) throw userError_('학번 8자리를 확인해 주세요.');
   var cache = CacheService.getScriptCache(), key = 'lgf_' + sid;
@@ -481,8 +556,7 @@ function apiLogin_(p) {
     throw userError_('비밀번호가 맞지 않아요. (' + (fails + 1) + '/5)');
   }
   cache.put(key, '0', 1);
-  t.set(u.row, '마지막로그인', new Date());
-  return { token: makeToken_(u), user: profile_(u) };
+  return { u: u, t: t };
 }
 
 /** payload: {token} → 내 정보와 납부자 여부 */
@@ -491,7 +565,12 @@ function apiMe_(p) { return profile_(authUser_(p)); }
 /** payload: {token, email, phone} → 연락처 바꾸기 */
 function apiUpdateProfile_(p) {
   var u = authUser_(p);
-  var email = cleanEmail_(p.email), phone = cleanPhone_(p.phone);
+  var phone = cleanPhone_(p.phone), email = u.email;
+  if (!sameEmail_(p.email, u.email)) {
+    email = cleanSchoolEmail_(p.email);
+    if (!String(p.code || '').trim()) throw userError_('새 이메일로 받은 인증번호를 입력해 주세요.');
+    checkCode_('change', u.studentId, email, p.code);
+  }
   var t = table_(SHEET.USERS);
   t.set(u.row, '이메일', email); t.set(u.row, '전화번호', phone);
   SpreadsheetApp.flush();
@@ -762,24 +841,91 @@ function apiRequestReturn_(p) {
 }
 
 // ───────────────────────── 관리자 ─────────────────────────
+/* 관리자 = [설정]의 '관리자 학번'에 적힌 학우. 자기 바탕화면 계정(학번·비밀번호)으로 들어온다 */
+function adminSids_() {
+  return String(getSetting_('관리자 학번') || '').split(/[^0-9]+/).filter(function (s) { return SID_RE.test(s); });
+}
 function apiAdminLogin_(p) {
-  var cache = CacheService.getScriptCache();
-  var fails = Number(cache.get('adm_fail') || 0);
-  if (fails >= 10) throw userError_('PIN을 여러 번 틀렸어요. 10분 뒤 다시 시도해 주세요.');
-  var pin = String(getSetting_('관리자 PIN') || '');
-  if (!pin || String(p.pin || '') !== pin) {
-    cache.put('adm_fail', String(fails + 1), 10 * 60);
-    Utilities.sleep(800);
-    throw userError_('PIN이 맞지 않아요.');
-  }
+  if (!adminSids_().length) throw userError_('시트 [설정]의 관리자 학번이 비어 있어요. 시트에서 먼저 적어 주세요.');
+  var r = checkPassword_(p);
+  if (adminSids_().indexOf(r.u.studentId) < 0) throw userError_('관리자로 등록된 학번이 아니에요. 시트 [설정]의 관리자 학번을 확인해 주세요.');
   var token = Utilities.getUuid();
-  cache.put('adm_' + token, '1', 6 * 60 * 60);
-  return { token: token, defaultPin: pin === '0000' };
+  CacheService.getScriptCache().put('adm_' + token, JSON.stringify({ sid: r.u.studentId, name: r.u.name }), 6 * 60 * 60);
+  return { token: token, name: r.u.name };
 }
 
+/** 관리자 토큰 확인. 관리자 학번에서 빠지면 바로 막힌다. 처리자 기록을 위해 currentAdmin_에 둔다 */
+var currentAdmin_ = null;
 function requireAdmin_(p) {
-  var ok = p && p.token && CacheService.getScriptCache().get('adm_' + p.token);
-  if (!ok) throw userError_('다시 로그인해 주세요.');
+  var raw = p && p.token && CacheService.getScriptCache().get('adm_' + p.token), a = null;
+  try { a = raw ? JSON.parse(raw) : null; } catch (e) { a = null; }
+  if (!a || !a.sid || adminSids_().indexOf(a.sid) < 0) throw userError_('다시 로그인해 주세요.');
+  currentAdmin_ = a;
+  return a;
+}
+function adminLabel_() { return currentAdmin_ ? currentAdmin_.name : '관리자'; }
+
+/* 관리기록에 남길 작업 이름 */
+var ADMIN_LOG_LABEL = {
+  adminConfirm: '반납 확인', adminReject: '자리에 없음', adminMarkLost: '분실 처리', adminItemStatus: '물품 상태 변경',
+  adminMemo: '물품 메모', adminRemind: '반납 안내 메일', adminReport: '신고 처리', adminRentUnban: '대여 정지 해제',
+  adminRoomReview: '퇴실 확인', adminRoomCancel: '예약 취소', adminRoomBan: '예약 중지', adminRoomUnban: '예약 중지 해제',
+  adminSuggest: '건의 답변', adminMemberLogout: '회원 로그인 풀기', adminMemberDelete: '회원 삭제'
+};
+function logAdmin_(name, p, data) {
+  try {
+    var target = [].concat(p.rentalIds || [], p.rentalId || [], p.rid || [], p.code || [], p.itemId || [], p.studentId || []).join(', ');
+    var bits = [];
+    if (p.status) bits.push(p.status);
+    if (p.item) bits.push('물품 ' + p.item);
+    if (p.ban) bits.push('직전 사용자 정지');
+    if (p.result) bits.push(p.result === 'ok' ? '확인' : '원상복구 안 됨');
+    if (p.text) bits.push(String(p.text).slice(0, 100));
+    if (p.answer) bits.push('답변: ' + String(p.answer).slice(0, 100));
+    if (p.close) bits.push('답변 없이 완료');
+    if (data && data.name && name === 'adminMemberDelete') bits.push(data.name);
+    table_(SHEET.LOG).append([{ '일시': new Date(), '처리자': currentAdmin_.name, '처리자 학번': currentAdmin_.sid,
+      '작업': ADMIN_LOG_LABEL[name], '대상': target, '내용': bits.join(' · ') }]);
+  } catch (e) { console.error('관리기록 실패: ' + e); } // 기록이 실패해도 처리는 그대로
+}
+
+/* ── 회원 관리: 찾기 · 로그인 풀기 · 삭제(학번 선점·탈퇴 요청 처리) ── */
+function adminMember_(u) {
+  return { studentId: u.studentId, name: u.name, email: u.email, phone: u.phone,
+    joined: u.joined ? fmtDateTime_(u.joined) : '', lastLogin: u.lastLogin ? fmtDateTime_(u.lastLogin) : '' };
+}
+function fmtDateTime_(d) { var x = toDate_(d); return x ? Utilities.formatDate(x, 'Asia/Seoul', 'yyyy-MM-dd HH:mm') : ''; }
+function apiAdminMembers_(p) {
+  requireAdmin_(p);
+  var q = String(p.q || '').replace(/\s+/g, '');
+  if (q.length < 2) throw userError_('학번이나 이름을 두 글자 이상 적어 주세요.');
+  var users = readUsers_();
+  var hit = users.filter(function (u) { return u.studentId.indexOf(q) >= 0 || normName_(u.name).indexOf(q) >= 0; });
+  return { total: users.length, list: hit.slice(0, 30).map(adminMember_), more: Math.max(0, hit.length - 30) };
+}
+function apiAdminMemberLogout_(p) {
+  requireAdmin_(p);
+  var sid = String(p.studentId || '');
+  var t = table_(SHEET.USERS), u = readUsers_(t).filter(function (x) { return x.studentId === sid; })[0];
+  if (!u) throw userError_('회원을 찾을 수 없어요.');
+  t.set(u.row, '세션버전', u.ver + 1);
+  SpreadsheetApp.flush();
+  return { studentId: sid, name: u.name };
+}
+function apiAdminMemberDelete_(p) {
+  requireAdmin_(p);
+  var sid = String(p.studentId || '');
+  if (String(p.confirm || '').replace(/\D/g, '') !== sid) throw userError_('지울 학번을 똑같이 적어 주세요.');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var t = table_(SHEET.USERS), u = readUsers_(t).filter(function (x) { return x.studentId === sid; })[0];
+    if (!u) throw userError_('회원을 찾을 수 없어요. 이미 지웠을 수 있어요.');
+    t.sh.deleteRow(u.row);
+    SpreadsheetApp.flush();
+    CacheService.getScriptCache().removeAll(['lgf_' + sid, 'evw_' + sid]);
+    return { studentId: sid, name: u.name };
+  } finally { lock.releaseLock(); }
 }
 
 /** 물품 메모 이력: 맨 위가 최신. 줄마다 "M/d 내용" */
@@ -846,7 +992,7 @@ function apiAdminData_(p) {
     appUrl: webUrl_(), sheetUrl: ssUrl,
     webUrlSet: !!String(getSetting_('웹앱 주소') || '').trim(),
     adminEmailsSet: adminEmails_().length > 0,
-    defaultPin: String(getSetting_('관리자 PIN')) === '0000'
+    adminName: adminLabel_(), adminSidsSet: adminSids_().length > 0
   };
 }
 
@@ -960,7 +1106,7 @@ function closeRentals_(ids, rentStatus, itemStatus, memo) {
       if (!r || (r.status !== RENT_STATUS.OUT && r.status !== RENT_STATUS.CHECK)) return;
       rt.set(r.row, '상태', rentStatus);
       rt.set(r.row, '반납확인일시', now);
-      rt.set(r.row, '처리자', '관리자');
+      rt.set(r.row, '처리자', adminLabel_());
       if (memo) rt.set(r.row, '메모', appendMemo_(r.memo, memo));
       r.status = rentStatus; r.returnOk = now;
       var x = items.filter(function (y) { return y.id === r.itemId; })[0];
@@ -1791,6 +1937,11 @@ function setup() {
   timeCols_(us, ['가입일시', '마지막로그인']);
   note_(us, '세션버전', '숫자를 1 올리면 그 학우의 모든 기기가 로그아웃돼요(휴대폰 분실 등).');
 
+  var lg = ss.getSheetByName(SHEET.LOG);
+  textCols_(lg, ['처리자 학번']);
+  timeCols_(lg, ['일시']);
+  width_(lg, '대상', 200); width_(lg, '내용', 360);
+
   Object.keys(CF_).forEach(function (n) { ss.getSheetByName(n).setConditionalFormatRules(CF_[n]); });
 
   // 탭 순서: 학생회가 채우는 시트 → 기록 시트
@@ -1805,7 +1956,7 @@ function setup() {
   if (def && def.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(def);
   ss.setActiveSheet(st);
   try {
-    SpreadsheetApp.getUi().alert('초기 설정이 끝났어요.\n\n[설정] 시트의 노란 칸(관리자 PIN·이메일·웹앱 주소)을 채우고, [물품]·[납부자] 시트를 채워 주세요.\n' +
+    SpreadsheetApp.getUi().alert('초기 설정이 끝났어요.\n\n[설정] 시트의 노란 칸(관리자 학번·이메일·웹앱 주소)을 채우고, [물품]·[납부자] 시트를 채워 주세요.\n' +
       '강의실 원본 사진은 내 드라이브의 「' + APP_NAME + ' 사진 › 강의실 원본 사진」 폴더에 올리면 돼요.');
   } catch (e) { /* 편집기에서 실행하면 UI가 없다 */ }
 }

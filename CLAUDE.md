@@ -1,15 +1,16 @@
 # 바탕화면 (교육학과 학생회 '바탕' 학우용 웹앱)
 
 교육학과 학생회 '바탕'의 학우용 웹앱입니다. 물품 대여, 강의실 예약, 건의함, KMU 혜택, 관리자 화면이 있습니다.
-현재 버전은 V5이고, 다음 버전은 V6입니다.
+현재 버전은 V5이고, 다음 버전은 V6입니다(V6 작업 중).
 
 ## 폴더 구조
-- **루트(GitHub Pages 화면)**: `index.html`, `admin.html`, `app.js`, `admin.js`, `common.js`, `styles.css`, `admin.css`, `config.js`, `logos.js`, `img/`
+- **루트(GitHub Pages 화면)**: `index.html`, `admin.html`, `app.js`, `admin.js`, `common.js`, `styles.css`, `admin.css`, `config.js`, `logos.js`, `sw.js`(서비스 워커), `offline.html`, `img/`
   - 학우와 관리자가 실제로 보는 화면입니다.
   - `config.js`의 `BATANG_API`는 구글 시트 쪽 웹앱 주소(`…/exec`)입니다. **이 주소를 바꾸지 마세요.**
 - **`apps-script/`(구글 시트 쪽 서버)**: `Code.gs`, `Index.html`, `Admin.html`, `Common.html`, `Styles.html`, `Logos.html`, `appsscript.json`
   - 서버 로직과 데이터 읽고 쓰기는 `Code.gs`에 있습니다.
   - `apps-script/*.html`은 구글 안에서 직접 보여 주는 화면이고, 루트 화면과 **같은 화면의 다른 버전**입니다. 화면을 고칠 때는 두 쪽이 모두 맞는지 확인하세요.
+  - `Index.html`의 `<script>` 안은 `app.js`, `Admin.html`은 `admin.js`, `Common.html`은 `common.js`, `Styles.html`의 `<style>` 안은 `styles.css`와 내용이 같습니다. 루트 파일을 고친 뒤 똑같이 옮겨 주세요.
 
 ## 배포 구조
 - `main`에 `apps-script/` 파일이 올라가면 GitHub Actions(`.github/workflows/deploy-apps-script.yml`)가 구글 시트의 Apps Script에 자동으로 올리고, 같은 배포 주소를 새 버전으로 갱신합니다.
@@ -29,6 +30,11 @@
 - 화면 확인: 로그인, 물품 목록, 강의실 예약 화면이 열리는지 봅니다.
 - 실기기 확인(사용자): 사파리, 크롬, 카카오톡 인앱 브라우저에서 버튼과 화면이 정상인지 확인합니다. Claude Code가 대신 할 수 없습니다.
 
-## 테스트 (미정)
+## 테스트 (테스트용 시트 사본)
 - 운영 시트에서 바로 테스트하지 않는 것을 원칙으로 합니다.
-- 테스트용 시트 복사본과 별도 Apps Script 프로젝트를 쓰는 방식은 아직 정하지 않았습니다. 정해지면 이 항목을 채워 주세요.
+- **테스트용 환경**: 운영 시트의 사본(개인정보를 지운 것)과 거기 붙은 별도 Apps Script 프로젝트입니다.
+  - GitHub 비밀 값 `STAGING_SCRIPT_ID`(사본 스크립트 ID), `STAGING_DEPLOYMENT_ID`(사본 웹앱 배포 ID)를 씁니다.
+  - `staging` 브랜치에 `apps-script/` 변경을 올리면 GitHub Actions가 **테스트용에만** 배포합니다. 운영은 바뀌지 않습니다.
+  - 테스트는 사본 웹앱 주소(`…/exec`, 관리자는 `…/exec?page=admin`)로 엽니다. GitHub Pages 화면은 운영 서버를 부르므로 테스트에 쓰지 않습니다.
+- **작업 순서**: `v6-기능이름` 브랜치에서 작업 → `staging`에 합쳐 올려 테스트 → 확인되면 PR로 `main`에 합침(운영 배포).
+- `staging` 브랜치는 테스트가 끝나면 `main`과 같게 맞춰 둡니다.

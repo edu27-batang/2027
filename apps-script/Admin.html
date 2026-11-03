@@ -89,9 +89,9 @@ a.icon-btn{color:var(--ink)}
 <?!= include('Logos') ?>
 <?!= include('Common') ?>
 <script>
-/* 바탕화면 관리자 화면 (V5): 물품 · 강의실 · 건의
+/* 바탕화면 관리자 화면 (V6): 물품 · 강의실 · 건의 · 회원
  * 버튼을 누르면 카드가 바로 정리되고, 전체 새로고침은 뒤에서 한다. 쓰던 답변·메모는 자동 새로고침에 지워지지 않는다. */
-var A = { token: null, data: null, sec: 'items', tab: { items: 'pending', rooms: 'toCheck', sug: 'open' }, drafts: {} };
+var A = { token: null, data: null, sec: 'items', tab: { items: 'pending', rooms: 'toCheck', sug: 'open' }, drafts: {}, members: null, memberQ: '' };
 try { A.token = sessionStorage.getItem('bth_admin'); } catch (e) { }
 try { var s0 = sessionStorage.getItem('bth_admin_sec'); if (s0) A.sec = s0; } catch (e) { }
 
@@ -103,13 +103,12 @@ function render() {
   var total = cnt.items + cnt.rooms + cnt.sug;
   document.title = (total ? '(' + total + ') ' : '') + '바탕화면 관리자';
   var html = adminTop();
-  if (d.defaultPin) html += note('관리자 PIN이 처음 값(0000)이에요. 시트의 [설정]에서 바꿔 주세요.');
   if (!d.webUrlSet) html += note('시트 [설정]의 웹앱 주소가 비어 있어요. GitHub 주소를 적어야 메일 속 링크와 비밀번호 재설정이 돼요.');
   if (!d.adminEmailsSet) html += note('관리자 이메일이 비어 있어 알림 메일을 받을 수 없어요. 시트의 [설정]에 적어 주세요.');
-  html += '<div class="seg" style="margin-top:10px">' + secBtn('items', '물품', cnt.items) + secBtn('rooms', '강의실', cnt.rooms) + secBtn('sug', '건의', cnt.sug) + '</div>';
+  html += '<div class="seg" style="margin-top:10px">' + secBtn('items', '물품', cnt.items) + secBtn('rooms', '강의실', cnt.rooms) + secBtn('sug', '건의', cnt.sug) + secBtn('members', '회원') + '</div>';
   if (d.mail && d.mail.skipped) html += note('오늘 메일 한도가 모자라 ' + d.mail.skipped + '통을 보내지 못했어요. 한도는 그날 첫 메일을 보낸 때부터 24시간 뒤에 다시 채워져요.');
   else if (d.mail && d.mail.left != null && d.mail.left < 15) html += note('오늘 보낼 수 있는 메일이 ' + d.mail.left + '통 남았어요.');
-  html += SECTIONS[A.sec](d);
+  html += (SECTIONS[A.sec] || SECTIONS.items)(d);
   html += '<p class="foot">' + (d.mail && d.mail.left != null ? '오늘 남은 메일 ' + d.mail.left + '통 · ' : '') + '관리자 즉시 알림 ' + (d.adminNotify ? '켜짐' : '꺼짐(아침 요약만)') + '</p>';
   $('#app').innerHTML = html;
   restoreDrafts();
@@ -167,6 +166,23 @@ var SECTIONS = {
     var S2 = d.suggestions, tab = A.tab.sug === 'done' ? 'done' : 'open';
     return stats([{ key: 'open', label: '새 건의', n: S2.open.length, hot: S2.open.length > 0 }, { key: 'done', label: '완료', n: S2.doneTotal }]) +
       '<div id="pane">' + (tab === 'done' ? SUG_DONE(S2.done) : SUG_OPEN(S2.open)) + '</div>';
+  },
+  /* ───────── 회원: 찾기 · 로그인 풀기 · 삭제 ───────── */
+  members: function () {
+    var M = A.members;
+    var html = '<div class="field" style="margin-top:12px"><label for="mq"><span>학번이나 이름으로 찾기</span></label><div class="mail-row">' +
+      '<input id="mq" inputmode="search" autocomplete="off" maxlength="20" placeholder="예: 2026 또는 김바탕" value="' + esc(A.memberQ) + '" onkeydown="if(event.key===\'Enter\')findMembers($(\'#mqBtn\'))">' +
+      '<button class="btn sm primary" id="mqBtn" onclick="findMembers(this)">찾기</button></div></div>';
+    if (!M) return html + '<div id="pane"><p class="foot">학번 선점 신고·탈퇴 요청이 오면 여기서 찾아 처리해요. 처리한 일은 시트 [관리기록]에 남아요.</p></div>';
+    if (!M.list.length) return html + '<div id="pane">' + empty('"' + esc(M.q) + '"에 맞는 회원이 없어요') + '</div>';
+    return html + '<div id="pane">' + M.list.map(function (u) {
+      return '<div class="rc"><div class="row"><span class="num">' + esc(u.studentId) + '</span><div class="grow nm">' + esc(u.name) + '</div></div>' +
+        '<div class="who">' + esc(u.email) + ' · <a href="tel:' + esc(u.phone) + '">' + esc(u.phone) + '</a></div>' +
+        '<div class="who">가입 ' + esc(u.joined || '-') + ' · 마지막 로그인 ' + esc(u.lastLogin || '-') + '</div>' +
+        '<div class="row" style="margin-top:10px;gap:8px"><button class="btn sm line" onclick="memberLogout(\'' + jsq(u.studentId) + '\',this)">로그인 풀기</button>' +
+        '<button class="btn sm danger" onclick="memberDelete(\'' + jsq(u.studentId) + '\',\'' + jsq(u.name) + '\',this)">회원 삭제</button></div></div>';
+    }).join('') + (M.more ? '<p class="foot">' + M.more + '명 더 있어요. 더 자세히 적어 주세요</p>' : '') +
+      '<p class="foot">전체 회원 ' + M.total + '명</p></div>';
   }
 };
 
@@ -374,23 +390,28 @@ function pruneDrafts(d) {
   Object.keys(A.drafts).forEach(function (k) { if (!keep[k]) delete A.drafts[k]; });
 }
 
-/* ── 로그인 ── */
+/* ── 로그인: 관리자도 자기 바탕화면 계정(학번·비밀번호)으로. 시트 [설정]의 관리자 학번에 있어야 들어온다 ── */
 function renderLogin() {
+  var last = store.get('adminSid') || '';
   $('#app').innerHTML = '<div class="fade" style="max-width:400px;margin:0 auto;width:100%">' + adminTop() +
-    '<div class="done" style="padding-top:20px">' + taang('hello', 168) + '<h1 class="title" style="margin-top:10px">관리자 PIN</h1></div>' +
-    '<label class="field"><input id="pin" class="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="••••" aria-label="관리자 PIN"></label>' +
-    '<button class="btn primary" id="loginBtn" onclick="login(this)">들어가기</button></div>';
-  var p = $('#pin'); p.focus();
-  p.addEventListener('keydown', function (e) { if (e.key === 'Enter') login($('#loginBtn')); });
+    '<div class="done" style="padding-top:20px">' + taang('hello', 168) + '<h1 class="title" style="margin-top:10px">관리자 로그인</h1>' +
+    '<p class="lead" style="margin:4px 0 0">바탕화면 학우 계정으로 들어와요</p></div>' +
+    '<label class="field"><span>학번</span><input id="a_sid" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="username" placeholder="20261234" value="' + esc(last) + '"></label>' +
+    '<label class="field"><span>비밀번호 · 숫자 6자리</span><input id="a_pw" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password" placeholder="••••••"></label>' +
+    '<button class="btn primary" id="loginBtn" onclick="login(this)">들어가기</button>' +
+    '<p class="foot">시트 [설정]의 <b>관리자 학번</b>에 적힌 학우만 들어올 수 있어요</p></div>';
+  var f = last ? $('#a_pw') : $('#a_sid'); f.focus();
+  $('#a_pw').addEventListener('keydown', function (e) { if (e.key === 'Enter') login($('#loginBtn')); });
 }
 function login(btn) {
-  var pin = $('#pin').value.trim();
-  if (!pin) return toast('PIN을 입력해 주세요');
+  var sid = $('#a_sid').value.replace(/\D/g, ''), pw = $('#a_pw').value;
+  if (sid.length !== 8) { toast('학번 8자리를 적어 주세요'); return $('#a_sid').focus(); }
+  if (pw.length !== 6) { toast('비밀번호 6자리를 적어 주세요'); return $('#a_pw').focus(); }
   busy(btn, true);
-  call('adminLogin', { pin: pin }).then(function (r) {
-    A.token = r.token; try { sessionStorage.setItem('bth_admin', r.token); } catch (e) { }
-    A.data = null; A.anim = 'sec'; render();
-  }).catch(function (e) { busy(btn, false); $('#pin').value = ''; toast(e.message); });
+  call('adminLogin', { studentId: sid, password: pw }).then(function (r) {
+    A.token = r.token; store.set('adminSid', sid); try { sessionStorage.setItem('bth_admin', r.token); } catch (e) { }
+    A.data = null; A.anim = 'sec'; render(); toast(r.name + '님, 반가워요');
+  }).catch(function (e) { busy(btn, false); $('#a_pw').value = ''; toast(e.message); });
 }
 function onAuthFail(e) {
   if (/로그인/.test(e.message)) { A.token = null; A.data = null; try { sessionStorage.removeItem('bth_admin'); } catch (x) { } render(); }
@@ -505,6 +526,47 @@ function openMemo(itemId) {
   openOverlay(m);
   setTimeout(function () { var t = $('textarea', m); if (t) t.focus(); }, 60);
 }
+/* ── 회원 ── */
+function findMembers(btn) {
+  var q = ($('#mq').value || '').trim();
+  if (q.replace(/\s+/g, '').length < 2) { toast('학번이나 이름을 두 글자 이상 적어 주세요'); return $('#mq').focus(); }
+  A.memberQ = q; busy(btn, true);
+  call('adminMembers', { token: A.token, q: q }).then(function (r) {
+    A.members = { q: q, list: r.list, total: r.total, more: r.more }; render();
+  }).catch(function (e) { busy(btn, false); onAuthFail(e); });
+}
+function memberLogout(sid, btn) {
+  ask('이 학우를 모든 기기에서 로그아웃시킬까요?', '휴대폰을 잃어버렸을 때처럼 다른 사람이 로그인해 있을 수 있을 때 써요. 학우는 다시 로그인하면 돼요.', '로그인 풀기').then(function (yes) {
+    if (!yes) return;
+    busy(btn, true);
+    call('adminMemberLogout', { token: A.token, studentId: sid }).then(function (r) { busy(btn, false); toast(r.name + ' 님을 모든 기기에서 로그아웃했어요'); })
+      .catch(function (e) { busy(btn, false); onAuthFail(e); });
+  });
+}
+/* 회원 삭제: 학번을 똑같이 적어야 지워진다(실수 방지). 대여·예약 기록은 그대로 남는다 */
+function memberDelete(sid, name, btn) {
+  var m = document.createElement('div'); m.className = 'overlay';
+  m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="mdT"><b id="mdT" style="font-size:19px;display:block">' + esc(name) + '(' + esc(sid) + ') 회원을 지울까요?</b>' +
+    '<p class="lead" style="margin:8px 0 0">시트 [회원]에서 이 줄이 지워지고 바로 로그아웃돼요. 같은 학번으로 다시 가입할 수 있어요. 대여·예약 기록은 지우지 않아요. 되돌릴 수 없어요.</p>' +
+    '<label class="field" style="margin:16px 0 0"><span>확인을 위해 학번을 적어 주세요</span><input id="mdSid" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="' + esc(sid) + '"></label>' +
+    '<div class="row" style="margin-top:18px"><button class="btn soft" data-v="0">아니요</button><button class="btn danger strong" data-v="1">회원 삭제</button></div></div>';
+  m.onclick = function (e) {
+    var v = e.target.closest('[data-v]');
+    if (e.target === m || (v && v.dataset.v === '0')) return closeOverlay(m);
+    if (!v) return;
+    var typed = ($('#mdSid', m).value || '').replace(/\D/g, '');
+    if (typed !== sid) { toast('학번을 똑같이 적어 주세요'); return $('#mdSid', m).focus(); }
+    busy(v, true);
+    call('adminMemberDelete', { token: A.token, studentId: sid, confirm: typed }).then(function (r) {
+      closeOverlay(m); toast(r.name + ' 님을 회원에서 지웠어요');
+      if (A.members) A.members.list = A.members.list.filter(function (u) { return u.studentId !== sid; });
+      if (A.members) A.members.total = Math.max(0, A.members.total - 1);
+      render();
+    }).catch(function (e) { busy(v, false); onAuthFail(e); });
+  };
+  openOverlay(m);
+  setTimeout(function () { var t = $('#mdSid', m); if (t) t.focus(); }, 60);
+}
 function unbanRent(sid, btn) { act('adminRentUnban', { studentId: sid }, btn, '대여 정지를 풀었어요'); }
 function toggleItem(id, status, btn) {
   var next = status === '대여가능' ? '사용중지' : '대여가능';
@@ -602,11 +664,17 @@ function adminHelp() {
     { key: 'mail', title: '메일 한도', html: '<p>Google이 정한 하루 메일 한도는 <b>받는 사람 수</b>로 세요. 학생회 계정(Google Workspace Business Starter)은 <b>하루 1,500명</b>이에요. 한도는 첫 메일을 보낸 때부터 24시간 뒤에 다시 채워져요. 무료 체험 기간에는 더 낮을 수 있어요.</p>' +
       '<ul><li>한도가 모자라면 앱이 멈추지 않고 그 메일만 건너뛰어요. 이 화면 위에 몇 통을 못 보냈는지 나와요.</li>' +
       '<li>아끼려면 시트 [설정]의 <b>관리자 즉시 알림</b>을 <b>사용 안 함</b>으로 바꿔요.</li></ul>' },
-    { key: 'sheet', title: '시트에서 바꾸는 것', html: '<ul><li>머리글이 <b>노란 칸</b>은 손으로 고쳐도 되고, <b>회색 칸</b>은 앱이 쓰는 칸이에요. 열 이름만 바꾸지 않으면 열 순서는 옮겨도 돼요.</li><li>[설정]: 대여 기간, 최대 수, PIN, 관리자 이메일, 강의실 시간·규칙, 안내문</li><li>[물품] [납부자] [혜택]: 학생회가 채우는 시트(초록 탭)</li><li>나머지(회색 탭)는 기록이에요. 가능하면 이 화면에서 처리해요.</li></ul>' }
+    { key: 'members', title: '회원', html: '<ul><li><b>찾기</b>: 학번이나 이름 두 글자 이상으로 찾아요.</li><li><b>로그인 풀기</b>: 그 학우의 모든 기기를 로그아웃시켜요(휴대폰 분실 등).</li>' +
+      '<li><b>회원 삭제</b>: 탈퇴 요청이나, 다른 사람이 남의 학번으로 먼저 가입한 경우에 써요. 확인 창에 학번을 똑같이 적어야 지워져요. 지우면 같은 학번으로 다시 가입할 수 있어요. 대여·예약 기록은 남아요.</li>' +
+      '<li>학번 선점 신고가 오면, 학생증 등으로 본인인지 확인한 뒤 지워 주세요.</li></ul>' },
+    { key: 'admins', title: '관리자·관리기록', html: '<ul><li>관리자는 시트 [설정]의 <b>관리자 학번</b>에 적힌 학우예요. 여러 명이면 쉼표로 구분해요. 그 학우의 바탕화면 계정(학번·비밀번호)으로 들어와요.</li>' +
+      '<li>임원이 바뀌면 관리자 학번만 고치면 돼요. 빠진 학번은 바로 들어올 수 없어요.</li>' +
+      '<li>이 화면에서 처리한 일은 시트 <b>[관리기록]</b>에 누가·언제·무엇을 했는지 한 줄씩 남아요. 대여기록의 처리자 칸에도 이름이 들어가요.</li></ul>' },
+    { key: 'sheet', title: '시트에서 바꾸는 것', html: '<ul><li>머리글이 <b>노란 칸</b>은 손으로 고쳐도 되고, <b>회색 칸</b>은 앱이 쓰는 칸이에요. 열 이름만 바꾸지 않으면 열 순서는 옮겨도 돼요.</li><li>[설정]: 대여 기간, 최대 수, 관리자 학번, 관리자 이메일, 강의실 시간·규칙, 안내문</li><li>[물품] [납부자] [혜택]: 학생회가 채우는 시트(초록 탭)</li><li>나머지(회색 탭)는 기록이에요. 가능하면 이 화면에서 처리해요.</li></ul>' }
   ];
 }
-setupHelp(adminHelp, function () { return { items: 'items', rooms: 'rooms', sug: 'sug' }[A.sec] || 'daily'; },
-  function () { return '관리자 · ' + ({ items: '물품', rooms: '강의실', sug: '건의' }[A.sec] || '') + ' · ' + (A.tab[A.sec] || ''); });
+setupHelp(adminHelp, function () { return { items: 'items', rooms: 'rooms', sug: 'sug', members: 'members' }[A.sec] || 'daily'; },
+  function () { return '관리자 · ' + ({ items: '물품', rooms: '강의실', sug: '건의', members: '회원' }[A.sec] || '') + ' · ' + (A.tab[A.sec] || ''); });
 
 render();
 /* 1분마다 새로 받는다. 창이 열려 있거나, 입력 중이거나, 쓰던 답변·메모가 있으면 미룬다 */
