@@ -1,7 +1,7 @@
 # 바탕화면 (교육학과 학생회 '바탕' 학우용 웹앱)
 
 교육학과 학생회 '바탕'의 학우용 웹앱입니다. 물품 대여, 강의실 예약, 건의함, KMU 혜택, 관리자 화면이 있습니다.
-현재 버전은 V5이고, 다음 버전은 V6입니다(V6 작업 중).
+현재 버전은 V7이고, 다음 버전은 V8입니다(V7 작업 완료, 추후 V8 작업 예정).
 
 ## 폴더 구조
 - **루트(GitHub Pages 화면)**: `index.html`, `admin.html`, `app.js`, `admin.js`, `common.js`, `styles.css`, `admin.css`, `config.js`, `logos.js`, `sw.js`(서비스 워커), `offline.html`, `img/`
