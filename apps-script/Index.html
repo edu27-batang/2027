@@ -373,6 +373,12 @@ function myBox() {
 /* 홈 화면에 추가 안내: 처음 한 번, 닫으면 다시 안 뜬다. 이미 앱으로 열었으면 안 뜬다. */
 var installEvt = null;
 window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); installEvt = e; });
+window.addEventListener('appinstalled', function () { installEvt = null; closeA2hs(); });
+/* 서비스 워커: 안드로이드에서 [추가]가 설치 창을 바로 띄우는 조건이고, 인터넷이 끊겼을 때 안내 화면을 보여 준다.
+ * Apps Script 화면(iframe) 안에서는 쓰지 않는다. 화면 파일은 항상 새로 받으므로 배포 후 옛 화면이 남지 않는다. */
+if ('serviceWorker' in navigator && location.protocol === 'https:' && !(window.google && google.script)) {
+  window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () { }); });
+}
 function isStandalone() { return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }
 function a2hsCard() {
   if (isStandalone() || store.get('a2hs') || (window.google && google.script)) return '';
@@ -382,10 +388,14 @@ function a2hsCard() {
 function closeA2hs() { store.set('a2hs', 1); var c = $('#a2hs'); if (c) { c.classList.add('gone'); setTimeout(function () { c.remove(); }, 240); } }
 function addToHome() {
   if (installEvt) { installEvt.prompt(); installEvt.userChoice.then(function (r) { if (r && r.outcome === 'accepted') closeA2hs(); installEvt = null; }); return; }
-  var ios = /iPhone|iPad|iPod/.test(navigator.userAgent), inApp = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV/i.test(navigator.userAgent);
+  var ua = navigator.userAgent, ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  var inApp = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(ua), iosOther = ios && /CriOS|FxiOS|EdgiOS|Whale/i.test(ua), samsung = /SamsungBrowser/i.test(ua);
   var steps = inApp
-    ? '<li>오른쪽 아래(또는 위) <b>⋯</b> 메뉴에서 <b>다른 브라우저로 열기</b>를 눌러요.</li><li>' + (ios ? 'Safari' : 'Chrome') + '에서 다시 이 순서를 따라 해요.</li>'
-    : ios ? '<li>아래쪽 <b>공유</b> 버튼(네모에서 화살표가 나오는 모양)을 눌러요.</li><li><b>홈 화면에 추가</b>를 눌러요.</li><li>오른쪽 위 <b>추가</b>를 누르면 끝!</li>'
+    ? '<li>오른쪽 아래(또는 위) <b>⋯</b> 메뉴에서 <b>다른 브라우저로 열기</b>를 눌러요.</li><li>' + (ios ? 'Safari' : 'Chrome') + '에서 열리면 [추가]를 다시 눌러요.</li>'
+    : iosOther ? '<li>주소창 오른쪽의 <b>공유</b> 버튼(네모에서 화살표가 나오는 모양)을 눌러요. 없으면 <b>⋯</b> 메뉴 안에 있어요.</li><li><b>홈 화면에 추가</b>를 눌러요.</li><li>오른쪽 위 <b>추가</b>를 누르면 끝!</li>' +
+      '<li class="hint">메뉴에 없으면 Safari로 열어서 해 주세요.</li>'
+    : ios ? '<li>아래쪽 <b>공유</b> 버튼(네모에서 화살표가 나오는 모양)을 눌러요. 주소창이 위에 있으면 오른쪽 위에 있어요.</li><li>목록을 올려 <b>홈 화면에 추가</b>를 눌러요.</li><li>오른쪽 위 <b>추가</b>를 누르면 끝!</li>'
+    : samsung ? '<li>아래쪽 <b>≡</b> 메뉴를 눌러요.</li><li><b>현재 페이지 추가</b> → <b>홈 화면</b>을 눌러요.</li>'
       : '<li>오른쪽 위 <b>⋮</b> 메뉴를 눌러요.</li><li><b>홈 화면에 추가</b> 또는 <b>앱 설치</b>를 눌러요.</li>';
   var m = document.createElement('div'); m.className = 'overlay sheet-up';
   m.innerHTML = '<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="a2T"><div class="row"><b id="a2T" class="grow" style="font-size:19px">홈 화면에 추가하기</b>' +
@@ -973,10 +983,12 @@ function helpSections() {
       '<p><b>실명</b>이면 내 이름으로 보내고, 답변을 가입한 이메일로도 알려 드려요.</p>' },
     { key: 'links', title: '혜택', html: '<p>국민대 시스템(강의실 대여, 학식, 셔틀, 도서관 DB 등)과 대학생 할인·AI 도구 혜택을 모아 두었어요.</p>' },
     { key: 'account', title: '로그인·회원가입', html:
-      '<ol><li><b>처음이면 회원가입</b>: 학번·이름·비밀번호(숫자 6자리)·이메일·전화번호를 한 번만 적어요.</li>' +
+      '<ol><li><b>처음이면 회원가입</b>: 학번·이름·비밀번호(숫자 6자리)·학교 이메일·전화번호를 한 번만 적어요.</li>' +
+      '<li><b>학교 이메일 인증</b>: @kookmin.ac.kr 주소를 적고 [인증번호 받기]를 누르면 6자리 숫자가 메일로 와요. 10분 안에 적어 주세요.</li>' +
       '<li><b>다음부터는 학번과 비밀번호</b>만 넣으면 돼요.</li><li><b>로그인 상태 유지</b>를 켜 두면 로그아웃할 때까지 다시 묻지 않아요.</li></ol>' +
       '<p><b>비밀번호를 잊었다면</b> 로그인 화면의 [비밀번호를 잊었어요] → 가입한 이메일로 온 버튼을 30분 안에 눌러 새로 정해요.</p>' +
-      '<p>연락처 수정과 로그아웃은 홈 오른쪽 위 <b>내 이름</b>을 눌러요.</p>' }
+      '<p>연락처 수정과 로그아웃은 홈 오른쪽 위 <b>내 이름</b>을 눌러요. 이메일을 바꾸면 새 주소로 인증번호를 받아요.</p>' +
+      '<p><b>회원 탈퇴</b>나 <b>내가 가입하지 않았는데 이미 가입한 학번</b>이라고 나오면 학생회에 알려 주세요. 바로 처리해 드려요.</p>' }
   ];
 }
 function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -1017,14 +1029,14 @@ Object.assign(VIEWS, {
       '<label class="field"><span>이름</span><input id="s_name" autocomplete="name" maxlength="20" placeholder="김바탕"></label>' +
       '<label class="field"><span>비밀번호 · 숫자 6자리</span><input id="s_pw" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="new-password" oninput="digitsOnly(this,6)"></label>' +
       '<label class="field"><span>비밀번호 확인</span><input id="s_pw2" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="••••••" autocomplete="new-password" oninput="digitsOnly(this,6)"></label>' +
-      '<label class="field"><span>이메일 · 안내 메일과 비밀번호 찾기에 써요</span><input id="s_email" type="email" inputmode="email" autocomplete="email" placeholder="name@kookmin.ac.kr"></label>' +
+      mailField('s_email', '학교 이메일 · 안내 메일과 비밀번호 찾기에 써요', '', 'signup') +
       '<label class="field"><span>전화번호</span><input id="s_phone" inputmode="tel" autocomplete="tel" placeholder="010-0000-0000"></label>' +
       '<div class="consent"><button class="agree" id="agree" aria-pressed="false" onclick="this.classList.toggle(\'on\');this.setAttribute(\'aria-pressed\',this.classList.contains(\'on\'))"><span class="check">' + I.check + '</span><div><b>개인정보 수집·이용에 동의해요 (필수)</b>' +
       '<small>자세한 사항은 아래를 참고해 주세요</small></div></button>' +
       '<details class="consent-more"><summary>자세히 보기</summary><table>' +
       '<tr><th>수집 항목</th><td>학번, 이름, 이메일, 전화번호, 비밀번호(암호화해 저장)</td></tr>' +
       '<tr><th>이용 목적</th><td>본인 확인과 로그인, 학생회비 납부 여부 확인, 물품대여·강의실 예약 관리, 반납·예약·건의 안내 메일, 비밀번호 재설정</td></tr>' +
-      '<tr><th>보관 기간</th><td>탈퇴를 요청하거나 졸업할 때까지. 대여·예약 기록은 학기가 끝나면 정리해요</td></tr>' +
+      '<tr><th>보관 기간</th><td>탈퇴를 요청하거나 졸업할 때까지. 회원 탈퇴는 학생회에 요청하면 바로 처리해요</td></tr>' +
       '<tr><th>보관 곳</th><td>교육학과 학생회 \'바탕\' 공용 구글 계정의 시트(학생회 임원만 열람)</td></tr>' +
       '</table></details></div>' +
       bottom('<button class="btn primary" id="signupBtn" onclick="doSignup(this)">가입하기</button>');
@@ -1058,7 +1070,7 @@ Object.assign(VIEWS, {
     var m = S.me;
     return topbar('내 정보') +
       hero(esc(m.name) + '님', esc(m.studentId) + ' · ' + (m.member ? '학생회비 납부자' : '학생회비 미납부'), m.member ? 'hello' : 'default') +
-      '<label class="field"><span>이메일</span><input id="p_email" type="email" inputmode="email" value="' + esc(m.email) + '"></label>' +
+      mailField('p_email', '이메일 · 바꾸면 새 주소로 인증번호를 받아요', m.email, 'change') +
       '<label class="field"><span>전화번호</span><input id="p_phone" inputmode="tel" value="' + esc(m.phone) + '"></label>' +
       '<button class="btn soft" onclick="saveProfile(this)">연락처 저장</button>' +
       '<div class="row" style="margin-top:12px"><button class="btn line" onclick="pwByMail(this)">비밀번호 바꾸기</button><button class="btn line" onclick="logout()">로그아웃</button></div>' +
@@ -1091,12 +1103,13 @@ function leaveThen(next) {
 }
 function doSignup(btn) {
   var f = { studentId: $('#s_id').value, name: $('#s_name').value.trim(), password: $('#s_pw').value,
-    email: $('#s_email').value.trim(), phone: $('#s_phone').value.trim() };
+    email: $('#s_email').value.trim().toLowerCase(), phone: $('#s_phone').value.trim(), code: $('#s_email_code').value.trim() };
   if (f.studentId.length !== 8) { toast('학번 8자리를 적어 주세요'); return $('#s_id').focus(); }
   if (f.name.length < 2) { toast('이름을 적어 주세요'); return $('#s_name').focus(); }
   if (f.password.length !== 6) { toast('비밀번호를 숫자 6자리로 정해 주세요'); return $('#s_pw').focus(); }
   if (f.password !== $('#s_pw2').value) { toast('비밀번호 확인이 달라요'); return $('#s_pw2').focus(); }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email)) { toast('이메일을 확인해 주세요'); return $('#s_email').focus(); }
+  if (!SCHOOL_MAIL.test(f.email)) { toast('학교 메일(@kookmin.ac.kr)을 적어 주세요'); return $('#s_email').focus(); }
+  if (f.code.length !== 6) { toast('메일로 받은 인증번호 6자리를 적어 주세요'); return $('#s_email_code').focus(); }
   if (!/^01\d{8,9}$/.test(f.phone.replace(/\D/g, ''))) { toast('전화번호를 확인해 주세요'); return $('#s_phone').focus(); }
   if (!$('#agree').classList.contains('on')) return toast('개인정보 수집·이용 동의가 필요해요');
   f.agree = true;
@@ -1125,12 +1138,57 @@ function doReset(btn) {
   }).catch(function (e) { busy(btn, false); toast(e.message); });
 }
 function saveProfile(btn) {
-  var email = $('#p_email').value.trim(), phone = $('#p_phone').value.trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('이메일을 확인해 주세요');
+  var email = $('#p_email').value.trim().toLowerCase(), phone = $('#p_phone').value.trim(), code = $('#p_email_code').value.trim();
+  var changed = email !== String(S.me.email || '').toLowerCase();
+  if (changed && !SCHOOL_MAIL.test(email)) return toast('학교 메일(@kookmin.ac.kr)을 적어 주세요');
+  if (changed && code.length !== 6) { toast('새 이메일로 받은 인증번호 6자리를 적어 주세요'); return $('#p_email_code').focus(); }
   if (!/^01\d{8,9}$/.test(phone.replace(/\D/g, ''))) return toast('전화번호를 확인해 주세요');
   busy(btn, true);
-  call('updateProfile', { email: email, phone: phone }).then(function (u) {
+  call('updateProfile', { email: email, phone: phone, code: changed ? code : '' }).then(function (u) {
     busy(btn, false); S.me = u; store.set('user', u); toast('저장했어요');
+    var pe = $('#p_email'); if (pe) { pe.value = u.email; pe.setAttribute('data-orig', u.email); $('#p_email_code').value = ''; mailChanged(pe); }
+  }).catch(function (e) { busy(btn, false); toast(e.message); });
+}
+
+/* ── 학교 메일 인증 ──
+ * 가입: 이메일 칸 옆 [인증번호 받기] → 메일로 온 6자리를 아래 칸에 적는다.
+ * 내 정보: 이메일을 고치면 인증번호 줄이 나타난다. 그대로면 숨긴다. */
+var SCHOOL_MAIL = /^[^\s@]+@kookmin\.ac\.kr$/i;
+function mailField(id, label, value, purpose) {
+  var hide = purpose === 'change' ? ' hide' : '';
+  return '<div class="field"><label for="' + id + '"><span>' + label + '</span></label>' +
+    '<div class="mail-row"><input id="' + id + '" type="email" inputmode="email" autocomplete="email" placeholder="name@kookmin.ac.kr" value="' + esc(value) + '"' +
+    (purpose === 'change' ? ' data-orig="' + esc(value) + '" oninput="mailChanged(this)"' : '') + '>' +
+    '<button type="button" class="btn sm soft' + hide + '" id="' + id + '_send" onclick="sendMailCode(this,\'' + id + '\',\'' + purpose + '\')">인증번호 받기</button></div>' +
+    '<label class="code-row' + hide + '" id="' + id + '_codeRow"><span>인증번호 6자리 · 10분 동안 쓸 수 있어요</span>' +
+    '<input id="' + id + '_code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="메일로 받은 숫자" oninput="digitsOnly(this,6)"></label></div>';
+}
+function mailChanged(input) {
+  var on = input.value.trim().toLowerCase() !== String(input.getAttribute('data-orig') || '').toLowerCase();
+  $('#' + input.id + '_send').classList.toggle('hide', !on);
+  $('#' + input.id + '_codeRow').classList.toggle('hide', !on);
+}
+function sendMailCode(btn, id, purpose) {
+  var email = $('#' + id).value.trim().toLowerCase();
+  if (!SCHOOL_MAIL.test(email)) { toast('학교 메일(@kookmin.ac.kr)을 적어 주세요'); return $('#' + id).focus(); }
+  var p = { purpose: purpose, email: email };
+  if (purpose === 'signup') {
+    p.studentId = $('#s_id').value; p.name = $('#s_name').value.trim();
+    if (p.studentId.length !== 8) { toast('학번 8자리를 먼저 적어 주세요'); return $('#s_id').focus(); }
+  }
+  busy(btn, true);
+  (purpose === 'signup' ? rawCall : call)('emailCode', p).then(function (r) {
+    busy(btn, false);
+    toast(r.email + '로 인증번호를 보냈어요');
+    $('#' + id + '_codeRow').classList.remove('hide');
+    var c = $('#' + id + '_code'); if (c) c.focus();
+    var left = 60; btn.disabled = true;
+    var tick = function () {
+      if (!document.body.contains(btn)) return;
+      if (left <= 0) { btn.disabled = false; btn.textContent = '다시 받기'; return; }
+      btn.textContent = '다시 받기 ' + left--; setTimeout(tick, 1000);
+    };
+    tick();
   }).catch(function (e) { busy(btn, false); toast(e.message); });
 }
 function pwByMail(btn) {

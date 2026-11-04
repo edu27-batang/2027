@@ -536,3 +536,12 @@ body.intro-out .intro-tag{animation:none;opacity:0}
 body.intro-out .intro-layers{transition:opacity .35s ease,transform .45s cubic-bezier(.6,0,.4,1);opacity:0;transform:translateX(-50%) scale(.92)}
 body.intro-out .intro-layers span{animation:none}
 @media (prefers-reduced-motion: reduce){.login-hero,.login-card,.join,.login>.foot{transition:none}}
+
+/* ── V6: 학교 메일 인증 ── */
+.field>label>span{display:block;font-size:14px;color:var(--sub);margin:0 4px 6px}
+.mail-row{display:flex;gap:8px;align-items:center}
+.mail-row input{flex:1;min-width:0}
+.mail-row .btn.sm{flex:none;height:54px;border-radius:14px;padding:0 14px}
+.code-row{display:block;margin-top:10px}
+.code-row>span{display:block;font-size:14px;color:var(--sub);margin:0 4px 6px}
+.code-row input{letter-spacing:4px;font-variant-numeric:tabular-nums}

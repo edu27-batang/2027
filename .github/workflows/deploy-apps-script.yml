@@ -1,10 +1,12 @@
 name: Deploy Apps Script
 
-# main에 apps-script/ 파일이 바뀌어 올라오면 구글 시트의 Apps Script에 올리고,
+# main에 apps-script/ 파일이 바뀌어 올라오면 운영 시트의 Apps Script에 올리고,
 # 같은 배포 주소(/exec)를 새 버전으로 갱신한다. 주소는 바뀌지 않는다.
+# staging 브랜치에 올리면 운영이 아니라 '테스트용 시트 사본'의 Apps Script에 올린다
+# (비밀 값 STAGING_SCRIPT_ID · STAGING_DEPLOYMENT_ID 사용). 학우들이 쓰는 운영 서버는 그대로다.
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - 'apps-script/**'
       - '.clasp.json'
@@ -31,12 +33,25 @@ jobs:
           if [ -z "$CLASPRC_JSON" ]; then echo "CLASPRC_JSON 비밀 값이 없어요"; exit 1; fi
           printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
 
+      - name: 테스트용이면 테스트 시트 사본의 스크립트로 바꾸기
+        if: github.ref == 'refs/heads/staging'
+        env:
+          STAGING_SCRIPT_ID: ${{ secrets.STAGING_SCRIPT_ID }}
+        run: |
+          if [ -z "$STAGING_SCRIPT_ID" ]; then echo "STAGING_SCRIPT_ID 비밀 값이 없어요"; exit 1; fi
+          printf '{"scriptId":"%s","rootDir":"apps-script"}' "$STAGING_SCRIPT_ID" > .clasp.json
+          echo "테스트용 Apps Script에 올려요(운영 아님)"
+
       - name: 코드 올리기
         run: clasp push --force
 
       - name: 같은 배포 주소를 새 버전으로 갱신
         env:
-          DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+          PROD_DEPLOYMENT_ID: ${{ secrets.APPS_SCRIPT_DEPLOYMENT_ID }}
+          STAGING_DEPLOYMENT_ID: ${{ secrets.STAGING_DEPLOYMENT_ID }}
         run: |
-          if [ -z "$DEPLOYMENT_ID" ]; then echo "APPS_SCRIPT_DEPLOYMENT_ID 비밀 값이 없어요"; exit 1; fi
+          # 테스트용에서 값이 비어 있어도 운영 배포 ID로 넘어가지 않게 따로 고른다
+          if [ "$GITHUB_REF" = "refs/heads/staging" ]; then TARGET="테스트용"; DEPLOYMENT_ID="$STAGING_DEPLOYMENT_ID"; else TARGET="운영"; DEPLOYMENT_ID="$PROD_DEPLOYMENT_ID"; fi
+          if [ -z "$DEPLOYMENT_ID" ]; then echo "$TARGET 배포 ID 비밀 값이 없어요"; exit 1; fi
           clasp deploy --deploymentId "$DEPLOYMENT_ID" --description "auto ${GITHUB_SHA:0:7}"
+          echo "$TARGET 배포 완료"
