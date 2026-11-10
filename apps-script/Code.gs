@@ -1,10 +1,10 @@
 /**
  * 바탕화면 V5 — 교육학과 학생회 '바탕'의 학우용 앱
- *   ① 물품대여  ② 강의실 예약(북악관 1005호)  ③ 건의  ④ KMU 혜택  + 관리자 화면
+ *   ① 물품대여  ② 강의실 예약(북악관 1005호)  ③ 건의  ④ KMU 혜택  ⑤ 학과 공지  + 관리자 화면
  *
  * 구조
  *  - 이 스크립트는 구글 시트에 붙어 있는(컨테이너 바인딩) Apps Script 프로젝트다.
- *  - 시트 12개: 설정 / 물품 / 납부자 / 혜택 (학생회가 채움) · 대여기록 / 물품신고 / 대여정지 / 예약 / 예약중지 / 건의 / 회원 / 관리기록 (앱이 씀)
+ *  - 시트 13개: 설정 / 물품 / 납부자 / 혜택 (학생회가 채움) · 대여기록 / 물품신고 / 대여정지 / 예약 / 예약중지 / 건의 / 회원 / 관리기록 / 공지 (앱이 씀)
  *  - 서버는 시트의 '열 이름'(1행)으로 칸을 찾는다. 열 순서를 바꾸거나 열을 끼워 넣어도 된다. 열 이름만 바꾸지 않으면 된다.
  *  - 화면을 띄우는 방법이 두 가지이고, 같은 코드로 둘 다 된다.
  *    (가) Apps Script 웹앱: doGet이 Index·Admin HTML을 보여 주고, 화면은 google.script.run으로 api()를 부른다.
@@ -15,8 +15,8 @@
 // ───────────────────────── 상수 ─────────────────────────
 var APP_NAME = '바탕화면';
 var SHEET = { SETTINGS: '설정', ITEMS: '물품', MEMBERS: '납부자', LINKS: '혜택',
-  RENTALS: '대여기록', REPORTS: '물품신고', RBANS: '대여정지', ROOMS: '예약', BANS: '예약중지', SUGGEST: '건의', USERS: '회원', LOG: '관리기록' };
-var SHEET_ORDER = ['설정', '물품', '납부자', '혜택', '대여기록', '물품신고', '대여정지', '예약', '예약중지', '건의', '회원', '관리기록'];
+  RENTALS: '대여기록', REPORTS: '물품신고', RBANS: '대여정지', ROOMS: '예약', BANS: '예약중지', SUGGEST: '건의', USERS: '회원', LOG: '관리기록', NOTICES: '공지' };
+var SHEET_ORDER = ['설정', '물품', '납부자', '혜택', '대여기록', '물품신고', '대여정지', '예약', '예약중지', '건의', '회원', '관리기록', '공지'];
 var INPUT_SHEETS = ['설정', '물품', '납부자', '혜택'];
 
 /* 각 시트의 열 이름. 새로 설치할 때 이 순서로 만든다. 사람이 보는 칸을 앞에, 앱만 쓰는 칸을 뒤에 둔다. */
@@ -49,6 +49,9 @@ EDITABLE[SHEET.BANS] = ['상태'];
 EDITABLE[SHEET.SUGGEST] = [];
 EDITABLE[SHEET.USERS] = ['이름', '이메일', '전화번호', '메모', '세션버전'];
 EDITABLE[SHEET.LOG] = [];
+/* 학과 공지. 관리자 화면 [공지]에서 쓰고, 시트에서 직접 고쳐도 된다. 마감일이 비어 있으면 '상시' 공지 */
+HEADERS[SHEET.NOTICES] = ['상태', '분류', '제목', '내용', '대상', '마감일', '링크', '중요', '등록일시', '수정일시', '작성자', '공지ID'];
+EDITABLE[SHEET.NOTICES] = ['상태', '분류', '제목', '내용', '대상', '마감일', '링크', '중요'];
 
 var ITEM_STATUS = { OK: '대여가능', OUT: '대여중', CHECK: '반납확인중', FIX: '점검중', OFF: '사용중지' };
 var RENT_STATUS = { OUT: '대여중', CHECK: '반납확인중', DONE: '반납완료', LOST: '분실' };
@@ -59,6 +62,9 @@ var SUGGEST_CATEGORIES = ['해 주세요', '불편해요', '기능 추가', '버
 var TYPES = ['전공서적', '복지물품'];
 var DUE_RULES = ['당일', '익일', '3일', '7일'];
 var REPORT_KIND_ = { missing: '없어요', damaged: '파손' };
+var NOTICE_STATUS = { ON: '게시', OFF: '내림' };
+var NOTICE_CATEGORIES = ['학사', '행사', '장학', '모집', '학생회', '기타'];
+var NOTICE_KEEP_DAYS_ = 30; // 마감된 공지를 학우 화면 '마감된 공지'에 남겨 두는 날 수
 
 /* [설정] 기본값. 값이 null인 줄은 구역 제목(■)이다. */
 var SETTING_DEFAULTS = [
@@ -147,14 +153,15 @@ function api(name, payload) {
     forgot: apiForgot_, resetPw: apiResetPw_,
     catalog: apiCatalog_, rent: apiRent_, mine: apiMine_, requestReturn: apiRequestReturn_,
     roomInfo: apiRoomInfo_, roomBook: apiRoomBook_, roomMine: apiRoomMine_, roomCancel: apiRoomCancel_, roomCheckout: apiRoomCheckout_,
-    suggest: apiSuggest_, suggestStatus: apiSuggestStatus_, links: apiLinks_,
+    suggest: apiSuggest_, suggestStatus: apiSuggestStatus_, links: apiLinks_, notices: apiNotices_,
     emailCode: apiEmailCode_,
     adminLogin: apiAdminLogin_, adminData: apiAdminData_,
     adminMembers: apiAdminMembers_, adminMemberLogout: apiAdminMemberLogout_, adminMemberDelete: apiAdminMemberDelete_, adminConfirm: apiAdminConfirm_, adminReject: apiAdminReject_,
     adminItemStatus: apiAdminItemStatus_, adminRemind: apiAdminRemind_, adminMarkLost: apiAdminMarkLost_,
     adminReport: apiAdminReport_, adminMemo: apiAdminMemo_, adminRentUnban: apiAdminRentUnban_,
     adminRoomReview: apiAdminRoomReview_, adminRoomCancel: apiAdminRoomCancel_, adminRoomBan: apiAdminRoomBan_, adminRoomUnban: apiAdminRoomUnban_,
-    adminSuggest: apiAdminSuggest_
+    adminSuggest: apiAdminSuggest_,
+    adminNoticeSave: apiAdminNoticeSave_, adminNoticeStatus: apiAdminNoticeStatus_, adminNoticeDelete: apiAdminNoticeDelete_
   };
   settingsCache_ = null; // 요청마다 [설정]을 새로 읽는다
   currentAdmin_ = null;
@@ -194,18 +201,24 @@ function table_(name) {
       headers.forEach(function (h) { o[h] = r[col[h] - 1]; });
       return o;
     }),
-    set: function (row, h, v) { sh.getRange(row, col[h]).setValue(v); },
+    set: function (row, h, v) { sh.getRange(row, col[h]).setValue(safeCell_(v)); },
     append: function (objs) {
       if (!objs.length) return;
       var arr = objs.map(function (o) {
         var a = []; for (var k = 0; k < W; k++) a.push('');
-        Object.keys(o).forEach(function (h) { if (!col[h]) throw new Error('없는 열: ' + h); a[col[h] - 1] = o[h]; });
+        Object.keys(o).forEach(function (h) { if (!col[h]) throw new Error('없는 열: ' + h); a[col[h] - 1] = safeCell_(o[h]); });
         return a;
       });
       sh.getRange(sh.getLastRow() + 1, 1, arr.length, W).setValues(arr);
     }
   };
 }
+
+/**
+ * 학우가 적은 글이 = + - @ 로 시작하면 시트가 수식으로 읽는다(건의 내용에 "=…"를 적으면 수식이 실행되거나 #NAME? 오류).
+ * 맨 앞에 작은따옴표를 붙여 항상 글자로 넣는다. 작은따옴표는 칸에 보이지 않고, 읽을 때도 붙어 나오지 않는다.
+ */
+function safeCell_(v) { return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v; }
 
 function ss_() {
   var ss = null;
@@ -393,6 +406,7 @@ function apiHome_(p) {
     out.rentMine = out.me.member ? mineOf_(me.studentId, readRentals_()) : [];
     out.roomMine = roomMineOf_(me.studentId, rooms);
     var want = (p.codes || []).slice(0, 20).map(function (c) { return String(c).replace(/[^A-Za-z0-9]/g, '').toUpperCase(); });
+    out.notices = noticeBrief_();
     out.answered = want.length ? readSuggestions_().filter(function (s) { return want.indexOf(s.code) >= 0 && s.status === SUGGEST_STATUS.DONE && s.answer; })
       .map(function (s) { return s.code; }) : [];
   }
@@ -870,11 +884,12 @@ var ADMIN_LOG_LABEL = {
   adminConfirm: '반납 확인', adminReject: '자리에 없음', adminMarkLost: '분실 처리', adminItemStatus: '물품 상태 변경',
   adminMemo: '물품 메모', adminRemind: '반납 안내 메일', adminReport: '신고 처리', adminRentUnban: '대여 정지 해제',
   adminRoomReview: '퇴실 확인', adminRoomCancel: '예약 취소', adminRoomBan: '예약 중지', adminRoomUnban: '예약 중지 해제',
-  adminSuggest: '건의 답변', adminMemberLogout: '회원 로그인 풀기', adminMemberDelete: '회원 삭제'
+  adminSuggest: '건의 답변', adminMemberLogout: '회원 로그인 풀기', adminMemberDelete: '회원 삭제',
+  adminNoticeSave: '공지 저장', adminNoticeStatus: '공지 게시·내림', adminNoticeDelete: '공지 삭제'
 };
 function logAdmin_(name, p, data) {
   try {
-    var target = [].concat(p.rentalIds || [], p.rentalId || [], p.rid || [], p.code || [], p.itemId || [], p.studentId || []).join(', ');
+    var target = [].concat(p.rentalIds || [], p.rentalId || [], p.rid || [], p.code || [], p.itemId || [], p.studentId || [], (data && data.id) || p.id || []).join(', ');
     var bits = [];
     if (p.status) bits.push(p.status);
     if (p.item) bits.push('물품 ' + p.item);
@@ -884,6 +899,7 @@ function logAdmin_(name, p, data) {
     if (p.answer) bits.push('답변: ' + String(p.answer).slice(0, 100));
     if (p.close) bits.push('답변 없이 완료');
     if (data && data.name && name === 'adminMemberDelete') bits.push(data.name);
+    if (data && data.title) bits.push((data.isNew ? '새 공지: ' : '') + String(data.title).slice(0, 60));
     table_(SHEET.LOG).append([{ '일시': new Date(), '처리자': currentAdmin_.name, '처리자 학번': currentAdmin_.sid,
       '작업': ADMIN_LOG_LABEL[name], '대상': target, '내용': bits.join(' · ') }]);
   } catch (e) { console.error('관리기록 실패: ' + e); } // 기록이 실패해도 처리는 그대로
@@ -892,9 +908,9 @@ function logAdmin_(name, p, data) {
 /* ── 회원 관리: 찾기 · 로그인 풀기 · 삭제(학번 선점·탈퇴 요청 처리) ── */
 function adminMember_(u) {
   return { studentId: u.studentId, name: u.name, email: u.email, phone: u.phone,
-    joined: u.joined ? fmtDateTime_(u.joined) : '', lastLogin: u.lastLogin ? fmtDateTime_(u.lastLogin) : '' };
+    joined: fmtFullTime_(u.joined), lastLogin: fmtFullTime_(u.lastLogin) };
 }
-function fmtDateTime_(d) { var x = toDate_(d); return x ? Utilities.formatDate(x, 'Asia/Seoul', 'yyyy-MM-dd HH:mm') : ''; }
+function fmtFullTime_(d) { var x = toDate_(d); return x ? Utilities.formatDate(x, 'Asia/Seoul', 'yyyy-MM-dd HH:mm') : ''; }
 function apiAdminMembers_(p) {
   requireAdmin_(p);
   var q = String(p.q || '').replace(/\s+/g, '');
@@ -986,6 +1002,8 @@ function apiAdminData_(p) {
       done: sugs.filter(function (x) { return x.status === SUGGEST_STATUS.DONE; }).slice(0, 20),
       doneTotal: sugs.filter(function (x) { return x.status === SUGGEST_STATUS.DONE; }).length
     },
+    notices: adminNotices_(),
+    noticeCategories: NOTICE_CATEGORIES,
     roomName: roomConfig_().room,
     mail: mailStatus_(),
     adminNotify: isOn_('관리자 즉시 알림'),
@@ -1110,7 +1128,8 @@ function closeRentals_(ids, rentStatus, itemStatus, memo) {
       if (memo) rt.set(r.row, '메모', appendMemo_(r.memo, memo));
       r.status = rentStatus; r.returnOk = now;
       var x = items.filter(function (y) { return y.id === r.itemId; })[0];
-      if (x) it.set(x.row, '상태', itemStatus);
+      // 대여 중에 시트에서 '사용중지'로 바꿔 둔 물품은 반납을 확인해도 그대로 둔다
+      if (x && !(rentStatus === RENT_STATUS.DONE && x.status === ITEM_STATUS.OFF)) it.set(x.row, '상태', itemStatus);
       if (rentStatus === RENT_STATUS.DONE) {
         safeMail_(r.email, '[' + APP_NAME + '] 반납이 끝났어요',
           mailBody_(r.name + '님, ' + r.itemName + '(' + r.itemId + ') 반납이 확인됐어요. 고마워요!', [], ''));
@@ -1620,13 +1639,17 @@ function apiAdminRoomBan_(p) {
 function apiAdminRoomUnban_(p) {
   requireAdmin_(p);
   var sid = String(p.studentId || '').replace(/\D/g, '');
-  var t = table_(SHEET.BANS), n = 0;
-  readBans_().forEach(function (b) {
-    if (b.studentId === sid && isActiveBan_(b)) { t.set(b.row, '상태', '해제'); t.set(b.row, '처리일시', new Date()); n++; }
-  });
-  if (!n) throw userError_('중지된 학우가 아니에요.');
-  SpreadsheetApp.flush();
-  return { studentId: sid };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var t = table_(SHEET.BANS), n = 0;
+    readBans_().forEach(function (b) {
+      if (b.studentId === sid && isActiveBan_(b)) { t.set(b.row, '상태', '해제'); t.set(b.row, '처리일시', new Date()); n++; }
+    });
+    if (!n) throw userError_('중지된 학우가 아니에요.');
+    SpreadsheetApp.flush();
+    return { studentId: sid };
+  } finally { lock.releaseLock(); }
 }
 
 // ───────────────────────── 건의 ─────────────────────────
@@ -1643,11 +1666,15 @@ function apiSuggest_(p) {
     var me = authUser_(p);
     name = me.name; email = p.noMail ? '' : me.email;
   }
-  // 장난 방지: 10분에 30건이 넘으면 잠시 막는다
+  // 장난 방지: 로그인한 학우는 한 사람당 10분에 5건, 로그인 없이(로그인 화면의 버그 신고)는 모두 합쳐 10분에 10건.
+  // 한도를 나눠 두어, 누가 마구 보내도 다른 학우의 건의는 막히지 않는다. 익명 건의의 학번은 한도를 세는 데만 쓰고 저장하지 않는다.
   var cache = CacheService.getScriptCache();
-  var cnt = Number(cache.get('sg_cnt') || 0);
-  if (cnt >= 30) throw userError_('지금 건의가 많이 들어오고 있어요. 잠시 뒤 다시 보내 주세요.');
-  cache.put('sg_cnt', String(cnt + 1), 600);
+  var sender = null;
+  try { sender = p.token ? authUser_(p) : null; } catch (e) { sender = null; }
+  var bucket = sender ? 'sg_u_' + sender.studentId : 'sg_cnt', cap = sender ? 5 : 10;
+  var cnt = Number(cache.get(bucket) || 0);
+  if (cnt >= cap) throw userError_(sender ? '건의를 연달아 많이 보냈어요. 10분 뒤 다시 보내 주세요.' : '지금 건의가 많이 들어오고 있어요. 잠시 뒤 다시 보내 주세요.');
+  cache.put(bucket, String(cnt + 1), 600);
 
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
@@ -1722,6 +1749,152 @@ function newCode_() {
   return s;
 }
 
+// ───────────────────────── 학과 공지 ─────────────────────────
+/*
+ * 마감일(yyyy-MM-dd)이 있으면 그날 23:59까지 '진행 중', 지나면 저절로 '마감된 공지'로 내려간다(30일 뒤 화면에서 사라짐, 시트에는 남음).
+ * 마감일이 비어 있으면 '상시' 공지로 위쪽에 고정된다. 상태가 '내림'이면 학우 화면에 보이지 않는다.
+ */
+function readNotices_(t) {
+  var sh = ss_().getSheetByName(SHEET.NOTICES);
+  if (!t && (!sh || sh.getLastRow() < 2)) return [];
+  t = t || table_(SHEET.NOTICES);
+  return t.rows.map(function (o) {
+    var dl = ymdOf_(o['마감일']);
+    return { row: o.row, id: String(o['공지ID']).trim(), status: String(o['상태']).trim() === NOTICE_STATUS.OFF ? NOTICE_STATUS.OFF : NOTICE_STATUS.ON,
+      category: NOTICE_CATEGORIES.indexOf(String(o['분류']).trim()) >= 0 ? String(o['분류']).trim() : '기타',
+      title: String(o['제목']).trim(), content: String(o['내용'] || '').replace(/\r/g, ''), target: String(o['대상'] || '').trim(),
+      deadline: /^\d{4}-\d{2}-\d{2}$/.test(dl) ? dl : '', link: safeUrl_(o['링크']),
+      important: /^(중요|예|y|yes|true|1|o)$/i.test(String(o['중요']).trim()),
+      at: toDate_(o['등록일시']), editedAt: toDate_(o['수정일시']), author: String(o['작성자'] || '') };
+  }).filter(function (n) { return n.title; }).map(function (n) {
+    if (!n.id) n.id = 'ROW' + n.row; // 시트에서 손으로 추가한 줄: 줄 번호로 구분(관리자 화면에서 한 번 저장하면 공지ID가 붙는다)
+    return n;
+  });
+}
+function safeUrl_(v) { var u = String(v || '').trim(); return /^https?:\/\/[^\s<>"']+$/i.test(u) ? u : ''; }
+function noticeDaysLeft_(n, today) {
+  if (!n.deadline) return null;
+  return Math.round((dateAt_(n.deadline, 12).getTime() - dateAt_(today, 12).getTime()) / 86400000);
+}
+function publicNotice_(n, today, full) {
+  var left = noticeDaysLeft_(n, today);
+  var x = { id: n.id, category: n.category, title: n.title, target: n.target, deadline: n.deadline,
+    deadlineLabel: n.deadline ? fmtYmd_(n.deadline) : '', daysLeft: left, closed: left !== null && left < 0,
+    important: n.important, at: n.at ? Utilities.formatDate(n.at, 'Asia/Seoul', 'yyyy-MM-dd') : '', atLabel: n.at ? fmtDate_(n.at) : '' };
+  if (full) { x.content = n.content; x.link = n.link; x.edited = !!(n.editedAt && n.at && n.editedAt.getTime() - n.at.getTime() > 60000); }
+  return x;
+}
+/** 학우 화면 순서: 중요 → 상시(마감 없음) → 마감 가까운 순. 마감된 것은 최근에 마감된 순 */
+function sortNotices_(list) {
+  return list.sort(function (a, b) {
+    if (a.closed !== b.closed) return a.closed ? 1 : -1;
+    if (a.closed) return b.deadline.localeCompare(a.deadline);
+    if (a.important !== b.important) return a.important ? -1 : 1;
+    if (!a.deadline !== !b.deadline) return a.deadline ? 1 : -1;
+    if (a.deadline !== b.deadline) return a.deadline.localeCompare(b.deadline);
+    return String(b.at).localeCompare(String(a.at));
+  });
+}
+function visibleNotices_(full) {
+  var today = ymd_(new Date());
+  return sortNotices_(readNotices_().filter(function (n) { return n.status === NOTICE_STATUS.ON; })
+    .map(function (n) { return publicNotice_(n, today, full); })
+    .filter(function (x) { return !x.closed || x.daysLeft >= -NOTICE_KEEP_DAYS_; }));
+}
+/** 홈에 싣는 요약: 진행 중인 공지의 제목·마감만(읽지 않은 수와 '곧 마감' 표시용) */
+function noticeBrief_() {
+  try { return visibleNotices_(false).filter(function (x) { return !x.closed; }).slice(0, 40); } catch (e) { console.error(e); return []; }
+}
+/** payload: {token} → {list:[진행 중 + 마감(30일)], categories} — 내용까지 한 번에 받아 화면은 기다리지 않고 넘긴다 */
+function apiNotices_(p) {
+  authUser_(p);
+  return { list: visibleNotices_(true), categories: NOTICE_CATEGORIES, keepDays: NOTICE_KEEP_DAYS_ };
+}
+
+function adminNotices_() {
+  var today = ymd_(new Date());
+  var all = readNotices_().map(function (n) {
+    var x = publicNotice_(n, today, true);
+    x.status = n.status; x.author = n.author; x.hidden = n.status === NOTICE_STATUS.OFF;
+    return x;
+  });
+  return {
+    live: sortNotices_(all.filter(function (x) { return !x.hidden && !x.closed; })),
+    closed: sortNotices_(all.filter(function (x) { return !x.hidden && x.closed; })).slice(0, 30),
+    hidden: all.filter(function (x) { return x.hidden; }).reverse().slice(0, 30)
+  };
+}
+function cleanNotice_(p) {
+  var title = String(p.title || '').replace(/\s+/g, ' ').trim();
+  if (title.length < 2) throw userError_('제목을 적어 주세요.');
+  if (title.length > 60) throw userError_('제목은 60자까지 적을 수 있어요.');
+  var content = String(p.content || '').replace(/\r/g, '').trim();
+  if (content.length > 3000) throw userError_('내용은 3000자까지 적을 수 있어요.');
+  var category = String(p.category || '');
+  if (NOTICE_CATEGORIES.indexOf(category) < 0) throw userError_('분류를 골라 주세요.');
+  var deadline = String(p.deadline || '').trim();
+  if (deadline && !/^\d{4}-\d{2}-\d{2}$/.test(deadline)) throw userError_('마감일을 다시 골라 주세요.');
+  if (deadline && ymd_(dateAt_(deadline, 12)) !== deadline) throw userError_('없는 날짜예요. 마감일을 다시 골라 주세요.');
+  var link = String(p.link || '').trim();
+  if (link && !safeUrl_(link)) throw userError_('링크는 https:// 로 시작하는 주소를 적어 주세요.');
+  return { '분류': category, '제목': title, '내용': content, '대상': String(p.target || '').replace(/\s+/g, ' ').trim().slice(0, 40),
+    '마감일': deadline, '링크': link, '중요': p.important ? '중요' : '' };
+}
+/** payload: {token, id?, category, title, content, target, deadline, link, important} — id가 없으면 새 공지 */
+function apiAdminNoticeSave_(p) {
+  var admin = requireAdmin_(p);
+  var v = cleanNotice_(p);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var t = table_(SHEET.NOTICES), now = new Date(), id = String(p.id || '');
+    if (id) {
+      var n = readNotices_(t).filter(function (x) { return x.id === id; })[0];
+      if (!n) throw userError_('공지를 찾을 수 없어요. 이미 지웠을 수 있어요.');
+      Object.keys(v).forEach(function (h) { t.set(n.row, h, v[h]); });
+      t.set(n.row, '수정일시', now);
+      if (/^ROW\d+$/.test(id)) { id = newNoticeId_(now); t.set(n.row, '공지ID', id); if (!n.at) t.set(n.row, '등록일시', now); }
+    } else {
+      id = newNoticeId_(now);
+      v['상태'] = NOTICE_STATUS.ON; v['등록일시'] = now; v['수정일시'] = now; v['작성자'] = admin.name; v['공지ID'] = id;
+      t.append([v]);
+    }
+    SpreadsheetApp.flush();
+    return { id: id, title: v['제목'], isNew: !p.id, notices: adminNotices_() };
+  } finally { lock.releaseLock(); }
+}
+function newNoticeId_(now) { return 'N' + Utilities.formatDate(now, 'Asia/Seoul', 'yyMMdd-HHmmss') + '-' + Math.floor(Math.random() * 900 + 100); }
+function findNotice_(t, id) {
+  var n = readNotices_(t).filter(function (x) { return x.id === String(id || ''); })[0];
+  if (!n) throw userError_('공지를 찾을 수 없어요. 이미 지웠을 수 있어요.');
+  return n;
+}
+/** payload: {token, id, status:'게시'|'내림'} — 내리면 학우 화면에서 사라지고, 다시 게시할 수 있다 */
+function apiAdminNoticeStatus_(p) {
+  requireAdmin_(p);
+  var status = p.status === NOTICE_STATUS.OFF ? NOTICE_STATUS.OFF : NOTICE_STATUS.ON;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var t = table_(SHEET.NOTICES), n = findNotice_(t, p.id);
+    t.set(n.row, '상태', status); t.set(n.row, '수정일시', new Date());
+    SpreadsheetApp.flush();
+    return { id: n.id, title: n.title, status: status, notices: adminNotices_() };
+  } finally { lock.releaseLock(); }
+}
+/** payload: {token, id} — 시트에서 줄을 지운다(되돌릴 수 없음) */
+function apiAdminNoticeDelete_(p) {
+  requireAdmin_(p);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var t = table_(SHEET.NOTICES), n = findNotice_(t, p.id);
+    t.sh.deleteRow(n.row);
+    SpreadsheetApp.flush();
+    return { id: n.id, title: n.title, notices: adminNotices_() };
+  } finally { lock.releaseLock(); }
+}
+
 // ───────────────────────── KMU 혜택 ─────────────────────────
 function apiLinks_() {
   var groups = [], idx = {};
@@ -1782,6 +1955,14 @@ function dailyJob() {
       mailBody_('물품 반납 확인 ' + pending.length + '건, 물품 신고 ' + openRep.length + '건, 연체 ' + overdue.length + '건, 강의실 퇴실 확인 ' + roomCheck.length + '건, 새 건의 ' + newSug.length + '건이 있어요.', lines, adminLink_()));
   }
   SpreadsheetApp.flush();
+  cleanMailSkips_();
+}
+/** '못 보낸 메일 수'는 날짜마다 속성 하나를 쓴다. 일주일 지난 것은 지운다(속성이 끝없이 쌓이지 않게). */
+function cleanMailSkips_() {
+  try {
+    var p = PropertiesService.getScriptProperties(), keep = ymd_(addDays_(new Date(), -7));
+    p.getKeys().forEach(function (k) { if (/^mail_skip_\d{4}-\d{2}-\d{2}$/.test(k) && k.slice(10) < keep) p.deleteProperty(k); });
+  } catch (e) { }
 }
 
 function sendOverdueMail_(r) {
@@ -1936,6 +2117,17 @@ function setup() {
   textCols_(us, ['학번', '전화번호']);
   timeCols_(us, ['가입일시', '마지막로그인']);
   note_(us, '세션버전', '숫자를 1 올리면 그 학우의 모든 기기가 로그아웃돼요(휴대폰 분실 등).');
+
+  var nt = ss.getSheetByName(SHEET.NOTICES);
+  textCols_(nt, ['마감일']);
+  timeCols_(nt, ['등록일시', '수정일시']);
+  listRule_(nt, '상태', [NOTICE_STATUS.ON, NOTICE_STATUS.OFF]);
+  listRule_(nt, '분류', NOTICE_CATEGORIES);
+  statusColors_(nt, '상태', { '게시': 'good', '내림': 'mute' });
+  note_(nt, '마감일', '2026-11-30처럼 적어요. 그날 23:59까지 진행 중으로 보이고, 지나면 저절로 [마감된 공지]로 내려가요. 비워 두면 [상시] 공지로 위쪽에 고정돼요.');
+  note_(nt, '중요', '「중요」라고 적으면 목록 맨 위에 올라가고 홈에도 보여요.');
+  note_(nt, '링크', 'https:// 로 시작하는 신청 폼·안내 주소(선택).');
+  width_(nt, '제목', 260); width_(nt, '내용', 420); width_(nt, '링크', 240);
 
   var lg = ss.getSheetByName(SHEET.LOG);
   textCols_(lg, ['처리자 학번']);
