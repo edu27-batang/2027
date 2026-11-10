@@ -1,7 +1,7 @@
 # 바탕화면 (교육학과 학생회 '바탕' 학우용 웹앱)
 
-교육학과 학생회 '바탕'의 학우용 웹앱입니다. 물품 대여, 강의실 예약, 건의함, KMU 혜택, 관리자 화면이 있습니다.
-현재 버전은 V7이고, 다음 버전은 V8입니다(V7 작업 완료, 추후 V8 작업 예정).
+교육학과 학생회 '바탕'의 학우용 웹앱입니다. 학과 공지, 물품 대여, 강의실 예약, 건의함, KMU 혜택, 관리자 화면이 있습니다.
+현재 버전은 V7이고, 다음 버전은 V8입니다(V8 작업 중: 학과 공지 · 화면 넘김 · 버그 수정 — 테스트용에서 확인하는 단계).
 
 ## 폴더 구조
 - **루트(GitHub Pages 화면)**: `index.html`, `admin.html`, `app.js`, `admin.js`, `common.js`, `styles.css`, `admin.css`, `config.js`, `logos.js`, `sw.js`(서비스 워커), `offline.html`, `img/`
@@ -10,7 +10,8 @@
 - **`apps-script/`(구글 시트 쪽 서버)**: `Code.gs`, `Index.html`, `Admin.html`, `Common.html`, `Styles.html`, `Logos.html`, `appsscript.json`
   - 서버 로직과 데이터 읽고 쓰기는 `Code.gs`에 있습니다.
   - `apps-script/*.html`은 구글 안에서 직접 보여 주는 화면이고, 루트 화면과 **같은 화면의 다른 버전**입니다. 화면을 고칠 때는 두 쪽이 모두 맞는지 확인하세요.
-  - `Index.html`의 `<script>` 안은 `app.js`, `Admin.html`은 `admin.js`, `Common.html`은 `common.js`, `Styles.html`의 `<style>` 안은 `styles.css`와 내용이 같습니다. 루트 파일을 고친 뒤 똑같이 옮겨 주세요.
+  - `Index.html`의 `<script>` 안은 `app.js`, `Admin.html`은 `admin.js`, `Common.html`은 `common.js`, `Styles.html`의 `<style>` 안은 `styles.css`와 내용이 같습니다. 루트 파일을 고친 뒤 `node tests/sync-apps-script.js`로 옮겨 주세요.
+- **`tests/`(자동 테스트·연습용 서버)**: 운영·테스트 시트와 무관하게 컴퓨터에서만 돕니다. 아래 [검증 방법] 참고.
 
 ## 배포 구조
 - `main`에 `apps-script/` 파일이 올라가면 GitHub Actions(`.github/workflows/deploy-apps-script.yml`)가 구글 시트의 Apps Script에 자동으로 올리고, 같은 배포 주소를 새 버전으로 갱신합니다.
@@ -26,6 +27,9 @@
 6. 기존 기능을 지우기 전에 어떤 학우 기능에 영향이 있는지 먼저 확인합니다.
 
 ## 검증 방법
+- 자동 테스트(서버): `node tests/api.test.js` — `Code.gs`를 가짜 구글 서비스 위에서 돌려 가입·대여·예약·건의·공지·관리자 권한을 확인합니다. 인터넷·구글 계정이 필요 없습니다. **고친 뒤 항상 통과해야 합니다.**
+- 화면 자동 점검(선택): `node tests/ui-check.js` — Playwright가 있으면 실제 브라우저로 로그인·공지·화면 넘김·관리자 공지를 눌러 봅니다.
+- 연습용 서버: `node tests/dev-server.js` → `http://localhost:8787` (학우 20260002 / 123456, 관리자 `/admin.html` 20260001 / 123456). 끄면 데이터가 사라지는 가짜 서버입니다.
 - 서버 확인: 웹앱 주소 뒤에 `?ping=1`을 붙이면 `{"ok":true …}`가 나와야 합니다.
 - 화면 확인: 로그인, 물품 목록, 강의실 예약 화면이 열리는지 봅니다.
 - 실기기 확인(사용자): 사파리, 크롬, 카카오톡 인앱 브라우저에서 버튼과 화면이 정상인지 확인합니다. Claude Code가 대신 할 수 없습니다.

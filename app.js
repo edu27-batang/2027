@@ -79,6 +79,8 @@ function go(view, push) {
   document.body.classList.toggle('authed', !AUTH_VIEWS[view]);
   syncFab();
   if (AFTER[view]) AFTER[view]();
+  // 뒤로 왔으면 보던 자리로(목록은 AFTER에서 그려지므로 그 뒤에 한 번 더 맞춘다)
+  if (mode === 'pop' && scrollMemo[stack.length - 1]) window.scrollTo(0, scrollMemo[stack.length - 1]);
 }
 /* 화면 위 화살표 */
 function back() {
@@ -393,7 +395,7 @@ function noticeLead() {
   var b = noticeBrief(), today = b.filter(function (n) { return n.daysLeft === 0; }).length;
   if (!noticeList() && !b.length) return ' ';
   if (!b.length) return '지금 진행 중인 공지가 없어요';
-  return '진행 중 ' + b.length + '개' + (today ? ' · 오늘 마감 ' + today + '개' : '') + ' · 마감이 가까운 순서예요';
+  return '진행 중 ' + b.length + '개' + (today ? ' · 오늘 마감 ' + today + '개' : '');
 }
 /* 홈의 공지 동그라미: 안 읽은 수(빨간 숫자)와 한 줄 요약 */
 function noticeFab() {
@@ -407,7 +409,10 @@ function noticeFab() {
 function noticeStrip() {
   var seen = seenNotices();
   var pick = noticeBrief().filter(function (n) { return isSoon(n) || (n.important && seen.indexOf(n.id) < 0); })
-    .sort(function (a, b) { return (seen.indexOf(a.id) >= 0) - (seen.indexOf(b.id) >= 0); }).slice(0, 2);
+    .sort(function (a, b) { // 안 읽은 것 먼저, 그다음 마감이 가까운 순
+      var d = (seen.indexOf(a.id) >= 0) - (seen.indexOf(b.id) >= 0);
+      return d || (a.daysLeft === null ? 99 : a.daysLeft) - (b.daysLeft === null ? 99 : b.daysLeft);
+    }).slice(0, 2);
   if (!pick.length) return '';
   return '<div class="h2" style="margin-top:30px">놓치지 마세요</div><div class="quick">' + pick.map(function (n) {
     var tone = n.daysLeft === 0 ? ' bad' : isSoon(n) ? ' warn' : '';
@@ -452,16 +457,17 @@ function renderNotices() {
     box.innerHTML = '<div class="card" style="margin-top:14px">' + oops(searching ? '"' + S.ntQ.trim() + '"에 맞는 공지가 없어요' : S.ntCat + ' 공지가 없어요', 'thinking') +
       '<button class="btn sm soft" style="margin:0 auto 6px" onclick="clearNoticeFilter()">전체 공지 보기</button></div>'; return;
   }
-  var always = hit.filter(function (n) { return !n.closed && n.daysLeft === null; });
-  var dated = hit.filter(function (n) { return !n.closed && n.daysLeft !== null; });
+  var top = hit.filter(function (n) { return !n.closed && n.important; });
+  var always = hit.filter(function (n) { return !n.closed && !n.important && n.daysLeft === null; });
+  var dated = hit.filter(function (n) { return !n.closed && !n.important && n.daysLeft !== null; });
   var closed = hit.filter(function (n) { return n.closed; });
   var sec = function (title, rows, sub) {
     return rows.length ? '<div class="h2 nt-h">' + title + (sub ? '<small>' + sub + '</small>' : '') + '</div><div class="list nt-list">' + rows.map(function (n) { return noticeRow(n, seen); }).join('') + '</div>' : '';
   };
-  var html = sec('상시 공지', always, '마감 없이 늘 열려 있어요') + sec('진행 중', dated, '마감이 가까운 순');
+  var html = sec('중요 공지', top, '') + sec('상시 공지', always, '마감 없이 늘 열려 있어요') + sec('진행 중', dated, '마감이 가까운 순');
   if (closed.length) {
     // 찾는 중이면 마감된 공지도 바로 보여 준다
-    var open = searching || S.ntShowClosed || (!always.length && !dated.length);
+    var open = searching || S.ntShowClosed || (!top.length && !always.length && !dated.length);
     html += '<button class="nt-more" aria-expanded="' + open + '" onclick="toggleClosedNotices()">마감된 공지 ' + closed.length + '개<span class="nt-chev' + (open ? ' up' : '') + '">' + I.chev + '</span></button>' +
       (open ? '<div class="list nt-list">' + closed.map(function (n) { return noticeRow(n, seen); }).join('') + '</div><p class="foot" style="margin-top:12px">마감한 지 ' + ((S.notices && S.notices.keepDays) || 30) + '일이 지나면 목록에서 사라져요</p>' : '');
   }
@@ -1134,7 +1140,7 @@ function helpSections() {
       '<ol><li>홈 왼쪽 위 <b>공지 동그라미</b>를 눌러요. 빨간 숫자는 아직 안 읽은 공지 수예요.</li>' +
       '<li>목록에는 <b>제목</b>과 <b>마감</b>만 보여요. 눌러서 마감 기한·대상·자세한 내용을 봐요.</li>' +
       '<li>위의 찾기 칸과 분류(학사·행사·장학…)로 필요한 공지를 골라 볼 수 있어요.</li></ol>' +
-      '<ul><li><b>상시 공지</b>는 마감이 없어서 늘 위에 있어요.</li><li><b>진행 중</b>인 공지는 마감이 가까운 순서예요. 오늘 마감·내일 마감·D-3처럼 표시돼요.</li>' +
+      '<ul><li><b>중요 공지</b>는 맨 위에, <b>상시 공지</b>는 마감이 없어서 늘 그 아래에 있어요.</li><li><b>진행 중</b>인 공지는 마감이 가까운 순서예요. 오늘 마감·내일 마감·D-3처럼 표시돼요.</li>' +
       '<li>마감이 지나면 저절로 <b>마감된 공지</b>로 내려가고, 30일 뒤에 목록에서 사라져요.</li>' +
       '<li>3일 안에 마감하는 공지는 홈의 <b>놓치지 마세요</b>에도 떠요. 오른쪽 위 공유 버튼으로 친구에게 보낼 수 있어요.</li></ul>' },
     { key: 'rent', title: '물품대여', html:

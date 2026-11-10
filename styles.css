@@ -605,3 +605,10 @@ body.intro-out .intro-layers span{animation:none}
 .nt-body{margin-top:22px;padding:0 2px;font-size:16px;line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere}
 .nt-body a{color:var(--green-deep);font-weight:600;text-underline-offset:3px;word-break:break-all}
 a.btn{text-decoration:none}
+/* 관리자 공지 쓰기 창 */
+.nt-form .sheet{max-width:520px}
+.pick-row{display:flex;flex-wrap:wrap;gap:6px}
+.pick-row button{height:40px;padding:0 16px;border-radius:12px;font-size:15px;font-weight:600;color:var(--sub);background:var(--card);box-shadow:inset 0 0 0 1px var(--line)}
+.pick-row button.on{background:var(--ink);color:#fff;box-shadow:none}
+.nt-form input[type=date]{min-height:54px;-webkit-appearance:none;appearance:none}
+

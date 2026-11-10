@@ -205,5 +205,15 @@ console.log('\n■ 매일 알림');
   t('dailyJob이 오류 없이 돌고, 오래된 "못 보낸 메일" 기록을 지운다', () => { e.ctx.dailyJob(); yes(!('mail_skip_2020-01-01' in e.props)); });
 }
 
+console.log('\n■ 화면 파일 짝 맞춤');
+{
+  const fs = require('fs'), path = require('path'), R = path.join(__dirname, '..');
+  const inner = (file, open, close) => { const s = fs.readFileSync(path.join(R, 'apps-script', file), 'utf8'); const b = s.lastIndexOf('\n' + close); const a = s.lastIndexOf(open + '\n', b); return s.slice(a + open.length + 1, b); };
+  [['Index.html', 'app.js', '<script>', '</script>'], ['Admin.html', 'admin.js', '<script>', '</script>'], ['Common.html', 'common.js', '<script>', '</script>'], ['Styles.html', 'styles.css', '<style>', '</style>']].forEach(j => {
+    t('apps-script/' + j[0] + ' 안의 내용이 ' + j[1] + '와 같다', () => yes(inner(j[0], j[2], j[3]) === fs.readFileSync(path.join(R, j[1]), 'utf8').replace(/\n+$/, ''), '다르면 node tests/sync-apps-script.js 를 돌려 주세요'));
+  });
+  t('루트 화면 스크립트에 문법 오류가 없다', () => ['app.js', 'admin.js', 'common.js', 'sw.js'].forEach(f => new Function(fs.readFileSync(path.join(R, f), 'utf8'))));
+}
+
 console.log('\n결과: 통과 ' + pass + ' · 실패 ' + fail + '\n');
 process.exit(fail ? 1 : 0);
