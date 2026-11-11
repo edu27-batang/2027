@@ -1,5 +1,5 @@
 /*
- * 바탕화면 서비스 워커 (V6)
+ * 바탕화면 서비스 워커 (V8)
  * - 화면 파일(HTML·JS·CSS)은 "네트워크 우선": 항상 새로 받는다 → 배포 후 옛 화면이 남지 않는다.
  * - 인터넷이 끊긴 채 화면을 열면 offline.html('연결을 확인해 주세요')을 보여 준다.
  * - 이미지·아이콘은 "저장본 우선": 거의 안 바뀌어서 빨리 뜬다. 이미지를 바꾸면 아래 VERSION을 올린다.
@@ -10,7 +10,7 @@
  *   self.addEventListener('activate', function () { self.registration.unregister(); });
  *   self.addEventListener('fetch', function () { });
  */
-var VERSION = 'v6.0';
+var VERSION = 'v8.0';
 var CACHE = 'bth-' + VERSION;
 var CORE = ['offline.html', 'styles.css', 'common.js', 'app.js', 'config.js', 'logos.js', 'manifest.webmanifest',
   'img/taang_sorry.svg', 'img/icon-192.png', 'img/favicon.png', 'img/logo-hwamyeon.webp'];

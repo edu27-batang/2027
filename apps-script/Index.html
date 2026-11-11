@@ -13,7 +13,7 @@
 <?!= include('Logos') ?>
 <?!= include('Common') ?>
 <script>
-/* 바탕화면 학우 화면 (V5): 로그인 · 홈 · 물품대여 · 강의실 예약 · 건의 · 혜택
+/* 바탕화면 학우 화면 (V8): 로그인 · 홈 · 공지 · 물품대여 · 강의실 예약 · 건의 · 혜택
  * 원칙: 화면을 넘길 때 서버를 기다리지 않는다. 이미 받은 정보로 먼저 그리고, 새 정보는 뒤에서 받아 조용히 바꾼다. */
 var APP = '바탕화면';
 var ORG = store.get('org') || "교육학과 제45대 학생회 '바탕'";
@@ -27,6 +27,8 @@ var S = {
   // 건의
   sgCat: null, sgText: '', anon: true, sgResult: null,
   links: null,
+  // 공지: 목록(내용 포함)을 한 번 받아 두고, 상세는 기다리지 않고 연다
+  notices: null, ntAt: 0, ntQ: '', ntCat: '전체', ntId: null, ntShowClosed: false,
   me: store.get('user') || { studentId: '', name: '', phone: '', email: '', member: false },
   token: loadToken(),
   resetTok: null, forgotMail: ''
@@ -47,13 +49,13 @@ function saveLogin(token, user, keep) {
 function clearLogin() {
   S.token = ''; S.me = { studentId: '', name: '', phone: '', email: '', member: false };
   try { ['bth_token', 'bth_user', 'bth_home'].forEach(function (k) { localStorage.removeItem(k); }); sessionStorage.removeItem('bth_token'); } catch (e) { }
-  S.home = null; S.cat = null; S.catAt = 0; S.roomMine = null;
+  S.home = null; S.cat = null; S.catAt = 0; S.roomMine = null; S.notices = null; S.ntAt = 0;
 }
 /* 서버 호출에 토큰을 붙이고, 로그인이 풀렸으면 로그인 화면으로 */
 var rawCall = call;
 call = function (name, payload) {
   var p = Object.assign({}, payload || {});
-  if (S.token && !p.token && p.anonymous !== true) p.token = S.token;
+  if (S.token && !p.token) p.token = S.token; // 익명 건의에도 붙는다: 서버가 '한 사람당 한도'를 세는 데만 쓰고 저장하지 않는다
   return rawCall(name, p).catch(function (e) {
     if (e && e.auth && S.token) { clearLogin(); stack = []; go('login'); toast('다시 로그인해 주세요'); }
     throw e;
@@ -64,20 +66,36 @@ call = function (name, payload) {
 var AUTH_VIEWS = { intro: 1, login: 1, signup: 1, forgot: 1, forgotSent: 1, reset: 1, resetDone: 1 };
 var stack = [];
 var poll = null;
-var navBack = false, noGhost = false; // 뒤로 갈 때는 반대 방향으로 미끄러지게
+var navBack = false, noGhost = false; // navBack: 이번 이동은 '뒤로'(걷어 내기) · noGhost: 이번 이동은 넘김 효과 없이
+var navFromPop = false;                // 휴대폰 '뒤로'(방문 기록)에서 온 이동인지
+var scrollMemo = {};                   // 화면 깊이별 스크롤 위치: 뒤로 오면 보던 자리로 돌아온다
 function go(view, push) {
+  var fromY = window.scrollY || 0;
   if (push !== false) stack.push(view);
   while (closeTopOverlay()) { /* 열린 창은 모두 닫는다 */ }
   if (poll) { clearInterval(poll); poll = null; }
   if (!AUTH_VIEWS[view] && !S.token) { stack = ['login']; view = 'login'; }
   if (view === 'rent' && !S.me.member) { stack = ['home']; view = 'home'; }
   var back = navBack; navBack = false;
-  if (noGhost) noGhost = false; else ghostOut($('#app'), back);
-  $('#app').innerHTML = '<div class="fade' + (back ? ' back' : '') + '">' + VIEWS[view]() + '</div>';
-  window.scrollTo(0, 0);
+  var mode = (noGhost || push === false) ? '' : (back ? 'pop' : 'push'); noGhost = false;
+  // 아이폰에서 가장자리를 밀어 뒤로 오면 브라우저가 이미 넘김 효과를 보여 줬다
+  if (mode === 'pop' && navFromPop && justEdgeSwiped()) mode = '';
+  if (mode === 'push') scrollMemo[stack.length - 2] = fromY;
+  var ghost = mode ? ghostOut($('#app'), mode) : null;
+  $('#app').innerHTML = '<div class="fade' + (ghost && mode === 'push' ? ' nav-push' : '') + '">' + VIEWS[view]() + '</div>';
+  window.scrollTo(0, mode === 'pop' ? (scrollMemo[stack.length - 1] || 0) : push === false ? fromY : 0);
+  if (ghost && mode === 'push') {
+    // 새 화면은 들어오는 동안만 화면에 고정된 한 장(layer)이고, 다 들어오면 보통 문서 흐름으로 돌아간다
+    var layer = $('#app > .fade'), settled = false;
+    var settle = function () { if (settled) return; settled = true; layer.classList.remove('nav-push'); ghost.remove(); };
+    layer.addEventListener('animationend', function (e) { if (e.target === layer) settle(); });
+    setTimeout(settle, NAV_MS.push + 60);
+  }
   document.body.classList.toggle('authed', !AUTH_VIEWS[view]);
   syncFab();
   if (AFTER[view]) AFTER[view]();
+  // 뒤로 왔으면 보던 자리로(목록은 AFTER에서 그려지므로 그 뒤에 한 번 더 맞춘다)
+  if (mode === 'pop' && scrollMemo[stack.length - 1]) window.scrollTo(0, scrollMemo[stack.length - 1]);
 }
 /* 화면 위 화살표 */
 function back() {
@@ -87,13 +105,14 @@ function back() {
 }
 /* 휴대폰 '뒤로'. 첫 화면이면 false(한 번 더 누르면 나간다) */
 function sysBack() {
+  navFromPop = true; setTimeout(function () { navFromPop = false; }, 0);
   if (stack.length > 1) return back();
   var v = stack[0];
   if (S.token && v !== 'home') { navBack = true; home(); return true; }
   if (!S.token && v && v !== 'login' && v !== 'intro') { stack = []; navBack = true; go('login'); return true; }
   return false;
 }
-function home() { stack = []; S.picked = []; S.reports = {}; S.sel = []; S.q = ''; S.range = null; S.photos = []; go('home'); }
+function home() { stack = []; scrollMemo = {}; S.picked = []; S.reports = {}; S.sel = []; S.q = ''; S.range = null; S.photos = []; navBack = true; go('home'); }
 function to(view) { go(view); }
 
 function topbar(title, right) {
@@ -125,9 +144,10 @@ var VIEWS = {
   home: function () {
     var member = S.me.member;
     return '<div class="home-head">' + logoHw(444, 'home-logo') +
-      '<div class="home-sub"><span class="grow"></span>' + helpBtn() +
+      '<div class="home-sub">' + noticeFab() + '<span class="grow"></span>' + helpBtn() +
       '<button class="me-chip" onclick="go(\'profile\')" aria-label="내 정보">' + esc(S.me.name) + '님 ' + I.chev + '</button></div></div>' +
       '<div class="tiles' + (member ? '' : ' three') + '" id="tiles">' + homeTiles() + '</div>' +
+      '<div id="ntBox">' + noticeStrip() + '</div>' +
       '<div id="myBox">' + myBox() + '</div>' + a2hsCard() +
       '<p class="foot" id="homeFoot">' + esc(ORG) + '</p>';
   },
@@ -320,6 +340,31 @@ var VIEWS = {
       '<div id="sgList">' + skel(1) + '</div>';
   },
 
+  /* ───────── 공지 ───────── */
+  notices: function () {
+    return topbar('공지') +
+      hero('학과 공지', esc(noticeLead()), 'guide', 'ntLead') +
+      '<label class="search" style="margin-top:0">' + I.search + '<input id="nt_q" type="search" placeholder="제목·내용·대상으로 찾기" autocomplete="off" aria-label="공지 찾기" value="' + esc(S.ntQ) + '"></label>' +
+      '<div class="chips" id="ntChips" role="tablist" aria-label="분류"></div>' +
+      '<div id="ntList">' + (noticeList() ? '' : skel(4)) + '</div>';
+  },
+  notice: function () {
+    var n = findNotice(S.ntId);
+    if (!n) return topbar('공지') + '<div class="done">' + taang('thinking', 150) + '<h1 class="title" style="margin-top:14px">내려간 공지예요</h1><p class="lead">학생회가 내렸거나 마감한 지 오래된 공지예요</p></div>' +
+      bottom('<button class="btn soft" onclick="back()">공지 목록으로</button>');
+    var body = n.content === undefined ? skel(2) : (n.content ? '<div class="nt-body">' + linkify(n.content) + '</div>' : '');
+    return topbar('공지', '<button class="icon-btn" aria-label="공지 공유하기" onclick="shareNotice()">' + I.share + '</button>') +
+      '<div class="nt-tags"><span class="chip mute">' + esc(n.category) + '</span>' + ddayChip(n, true) + (n.important ? '<span class="chip g">중요</span>' : '') + '</div>' +
+      '<h1 class="title nt-title">' + esc(n.title) + '</h1>' +
+      '<div class="card nt-meta">' +
+      '<div class="kv"><span>마감 기한</span><b>' + (n.deadline ? esc(dueText(n)) + '까지' : '상시 (마감 없음)') + '</b></div>' +
+      '<div class="kv"><span>대상</span><b>' + esc(n.target || '교육학과 학우') + '</b></div>' +
+      (n.atLabel ? '<div class="kv"><span>올린 날</span><b>' + esc(n.atLabel) + (n.edited ? ' · 수정됨' : '') + '</b></div>' : '') + '</div>' +
+      (n.closed ? '<div class="note" style="margin-top:14px"><b class="mk">!</b><div>마감된 공지예요. 궁금한 점은 학생회에 문의해 주세요.</div></div>' : '') +
+      '<div id="ntBody">' + body + '</div>' +
+      (n.link ? bottom('<a class="btn primary" href="' + esc(n.link) + '" target="_blank" rel="noopener noreferrer">' + (n.closed ? '안내 페이지 열기' : '신청·안내 페이지 열기') + ' ' + I.ext.replace('<svg', '<svg width="20" height="20"') + '</a>') : '');
+  },
+
   /* ───────── 혜택 ───────── */
   links: function () {
     return topbar('혜택') +
@@ -340,6 +385,130 @@ function homeTiles() {
     tile('suggest', 'letter', hw('건의'), newAns ? '새 답변 ' + newAns + '개' : '학생회에 건의해요') +
     tile('links', 'point', hw('혜택'), '학교 시스템·대학생 혜택');
 }
+/* ── 공지 ──
+ * 홈에는 진행 중인 공지의 제목·마감만(S.home.notices) 실려 오고, 공지 화면을 열면 내용까지 한 번에 받는다(S.notices).
+ * 읽은 공지는 이 휴대폰에 기억해 두고(ntSeen), 안 읽은 수를 홈의 동그라미에 보여 준다. */
+function noticeList() { return S.notices ? S.notices.list : null; }
+function noticeBrief() { return (noticeList() || (S.home && S.home.notices) || []).filter(function (n) { return !n.closed; }); }
+function findNotice(id) {
+  var hit = (noticeList() || []).filter(function (n) { return n.id === id; })[0];
+  return hit || ((S.home && S.home.notices) || []).filter(function (n) { return n.id === id; })[0] || null;
+}
+function seenNotices() { return store.get('ntSeen') || []; }
+function unreadNotices() { var seen = seenNotices(); return noticeBrief().filter(function (n) { return seen.indexOf(n.id) < 0; }); }
+function markNoticeSeen(id) { var seen = seenNotices(); if (seen.indexOf(id) < 0) { seen.push(id); store.set('ntSeen', seen.slice(-300)); } }
+/* 마감이 있는지는 deadline(빈 글자면 상시)으로 본다. 마감이 없으면 daysLeft가 비어 올 수 있다(google.script.run은 null 칸을 빼고 보낸다) */
+function hasDue(n) { return !!n.deadline; }
+function isSoon(n) { return hasDue(n) && !n.closed && n.daysLeft >= 0 && n.daysLeft <= 3; }
+/* '11월 12일 (목) 18:00' — 예전에 받아 둔 정보(시각 없음)는 그날 23:59 */
+function dueText(n) { return n.deadlineLabel && /\d:\d\d$/.test(n.deadlineLabel) ? n.deadlineLabel : (n.deadlineLabel || '') + ' 23:59'; }
+function dueClock(n) { var t = n.dueTime || '23:59'; return t === '23:59' ? '' : t + ' '; }
+/* 마감 칩: 오늘 마감 · 내일 마감 · D-5 · 상시 · 마감 */
+function ddayChip(n, long) {
+  if (n.closed) return '<span class="chip mute">마감</span>';
+  if (!hasDue(n)) return '<span class="chip ok">상시</span>';
+  if (n.daysLeft <= 0) return '<span class="chip bad">오늘 ' + dueClock(n) + '마감</span>';
+  if (n.daysLeft === 1) return '<span class="chip warn">내일 ' + dueClock(n) + '마감</span>';
+  return '<span class="chip ' + (n.daysLeft <= 3 ? 'warn' : 'mute') + '">D-' + n.daysLeft + '</span>';
+}
+function noticeLead() {
+  var b = noticeBrief(), today = b.filter(function (n) { return hasDue(n) && n.daysLeft <= 0; }).length;
+  if (!noticeList() && !b.length) return ' ';
+  if (!b.length) return '지금 진행 중인 공지가 없어요';
+  return '진행 중 ' + b.length + '개' + (today ? ' · 오늘 마감 ' + today + '개' : '');
+}
+/* 홈의 공지 동그라미: 안 읽은 수(빨간 숫자)와 한 줄 요약 */
+function noticeFab() {
+  var b = noticeBrief(), unread = unreadNotices().length, soon = b.filter(isSoon).length;
+  var sub = unread ? '새 공지 ' + unread + '개' : soon ? '곧 마감 ' + soon + '개' : b.length ? '진행 중 ' + b.length + '개' : '학과 소식';
+  return '<button class="nfab' + (unread ? ' new' : '') + '" id="nfab" onclick="go(\'notices\')" aria-label="공지 · ' + sub + '">' +
+    '<span class="nfab-c">' + I.horn + (unread ? '<i class="nfab-n">' + (unread > 9 ? '9+' : unread) + '</i>' : '') + '</span>' +
+    '<span class="nfab-t"><b>공지</b><small>' + sub + '</small></span></button>';
+}
+/* 홈의 '곧 마감': 3일 안에 마감하거나 중요한 공지 가운데 안 읽은 것부터 두 개 */
+function noticeStrip() {
+  var seen = seenNotices();
+  var pick = noticeBrief().filter(function (n) { return isSoon(n) || (n.important && seen.indexOf(n.id) < 0); })
+    .sort(function (a, b) { // 안 읽은 것 먼저, 그다음 마감이 가까운 순
+      var d = (seen.indexOf(a.id) >= 0) - (seen.indexOf(b.id) >= 0);
+      return d || (hasDue(a) ? a.daysLeft : 99) - (hasDue(b) ? b.daysLeft : 99);
+    }).slice(0, 2);
+  if (!pick.length) return '';
+  return '<div class="h2" style="margin-top:30px">놓치지 마세요</div><div class="quick">' + pick.map(function (n) {
+    var tone = hasDue(n) && n.daysLeft <= 0 ? ' bad' : isSoon(n) ? ' warn' : '';
+    return '<button class="qbar' + tone + '" onclick="openNotice(\'' + jsq(n.id) + '\')"><span class="qi">' + I.horn + '</span>' +
+      '<span class="qt"><b>' + esc(n.title) + '</b><small>' + (n.deadline ? esc(dueText(n)) + '까지' : '상시') + (n.target ? ' · ' + esc(n.target) : '') + '</small></span>' +
+      ddayChip(n) + '<span class="qc" aria-hidden="true">›</span></button>';
+  }).join('') + '</div>';
+}
+function openNotice(id) { S.ntId = id; go('notice'); }
+function loadNotices(force) {
+  if (S.notices && !force && Date.now() - S.ntAt < 60000) return Promise.resolve(S.notices);
+  return once('notices', function () { return call('notices'); }).then(function (r) {
+    S.notices = r; S.ntAt = Date.now();
+    if (S.home) { S.home.notices = r.list.filter(function (n) { return !n.closed; }).map(function (n) { var c = Object.assign({}, n); delete c.content; delete c.link; return c; }); store.set('home', S.home); }
+    return r;
+  });
+}
+function noticeMatches(n) {
+  if (S.ntCat !== '전체' && n.category !== S.ntCat) return false;
+  var q = S.ntQ.trim().toLowerCase().replace(/\s/g, '');
+  return !q || (n.title + n.category + (n.target || '') + (n.content || '')).toLowerCase().replace(/\s/g, '').indexOf(q) >= 0;
+}
+function noticeRow(n, seen) {
+  var unread = !n.closed && seen.indexOf(n.id) < 0;
+  return '<button class="nt' + (n.closed ? ' closed' : '') + (unread ? ' unread' : '') + '" onclick="openNotice(\'' + jsq(n.id) + '\')">' +
+    '<span class="nt-dot" aria-hidden="true"></span><span class="nt-t">' + (n.important && !n.closed ? '<span class="nt-pin" aria-label="중요">' + I.pin + '</span>' : '') + esc(n.title) +
+    (unread ? '<span class="sr"> (안 읽음)</span>' : '') + '</span>' + ddayChip(n) + '</button>';
+}
+/* 목록과 분류 칩만 다시 그린다(찾는 글자를 치는 동안 입력칸이 그대로 있도록) */
+function renderNotices() {
+  var box = $('#ntList'), chips = $('#ntChips'), list = noticeList(); if (!box || !list) return;
+  var lead = $('#ntLead'); if (lead) lead.textContent = noticeLead();
+  var cats = ['전체'].concat(((S.notices && S.notices.categories) || []).filter(function (c) { return list.some(function (n) { return n.category === c; }); }));
+  if (cats.indexOf(S.ntCat) < 0) S.ntCat = '전체';
+  chips.innerHTML = cats.length > 2 ? cats.map(function (c) {
+    var n = c === '전체' ? list.filter(function (x) { return !x.closed; }).length : list.filter(function (x) { return x.category === c && !x.closed; }).length;
+    return '<button role="tab" aria-selected="' + (S.ntCat === c) + '" class="' + (S.ntCat === c ? 'on' : '') + '" onclick="setNoticeCat(\'' + c + '\')">' + c + (n ? ' <i>' + n + '</i>' : '') + '</button>';
+  }).join('') : '';
+  var hit = list.filter(noticeMatches), seen = seenNotices(), searching = !!S.ntQ.trim();
+  if (!list.length) { box.innerHTML = '<div class="done" style="padding-top:28px">' + taang('thinking', 150) + '<h2 class="title" style="font-size:22px;margin-top:10px">아직 올라온 공지가 없어요</h2><p class="lead">새 공지가 올라오면 홈의 공지 동그라미에 숫자가 떠요</p></div>'; return; }
+  if (!hit.length) {
+    box.innerHTML = '<div class="card" style="margin-top:14px">' + oops(searching ? '"' + S.ntQ.trim() + '"에 맞는 공지가 없어요' : S.ntCat + ' 공지가 없어요', 'thinking') +
+      '<button class="btn sm soft" style="margin:0 auto 6px" onclick="clearNoticeFilter()">전체 공지 보기</button></div>'; return;
+  }
+  var top = hit.filter(function (n) { return !n.closed && n.important; });
+  var always = hit.filter(function (n) { return !n.closed && !n.important && !hasDue(n); });
+  var dated = hit.filter(function (n) { return !n.closed && !n.important && hasDue(n); });
+  var closed = hit.filter(function (n) { return n.closed; });
+  var sec = function (title, rows, sub) {
+    return rows.length ? '<div class="h2 nt-h">' + title + (sub ? '<small>' + sub + '</small>' : '') + '</div><div class="list nt-list">' + rows.map(function (n) { return noticeRow(n, seen); }).join('') + '</div>' : '';
+  };
+  var html = sec('중요 공지', top, '') + sec('상시 공지', always, '마감 없이 늘 열려 있어요') + sec('진행 중', dated, '마감이 가까운 순');
+  if (closed.length) {
+    // 찾는 중이면 마감된 공지도 바로 보여 준다
+    var open = searching || S.ntShowClosed || (!top.length && !always.length && !dated.length);
+    html += '<button class="nt-more" aria-expanded="' + open + '" onclick="toggleClosedNotices()">마감된 공지 ' + closed.length + '개<span class="nt-chev' + (open ? ' up' : '') + '">' + I.chev + '</span></button>' +
+      (open ? '<div class="list nt-list">' + closed.map(function (n) { return noticeRow(n, seen); }).join('') + '</div><p class="foot" style="margin-top:12px">마감한 지 ' + ((S.notices && S.notices.keepDays) || 30) + '일이 지나면 목록에서 사라져요</p>' : '');
+  }
+  box.innerHTML = html;
+}
+function setNoticeCat(c) { S.ntCat = c; renderNotices(); }
+function toggleClosedNotices() { S.ntShowClosed = !S.ntShowClosed; renderNotices(); }
+function clearNoticeFilter() { S.ntQ = ''; S.ntCat = '전체'; var q = $('#nt_q'); if (q) q.value = ''; renderNotices(); }
+/* 본문의 주소를 누를 수 있게 */
+function linkify(text) {
+  return esc(text).replace(/https?:\/\/[^\s<]+[^\s<.,)\]!?]/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>'; });
+}
+function shareNotice() {
+  var n = findNotice(S.ntId); if (!n) return;
+  var text = '[교육학과 공지] ' + n.title + '\n마감: ' + (n.deadline ? dueText(n) + '까지' : '상시') + (n.target ? '\n대상: ' + n.target : '') +
+    (n.content ? '\n\n' + n.content : '') + (n.link ? '\n\n' + n.link : '');
+  if (navigator.share) { navigator.share({ title: n.title, text: text }).catch(function () { }); return; }
+  try { navigator.clipboard.writeText(text).then(function () { toast('공지 내용을 복사했어요'); }, function () { toast('복사하지 못했어요. 내용을 길게 눌러 복사해 주세요'); }); }
+  catch (e) { toast('복사하지 못했어요. 내용을 길게 눌러 복사해 주세요'); }
+}
+
 /* 아직 열어 보지 않은 답변 */
 function newAnswers() {
   var seen = store.get('seenAns') || [];
@@ -449,6 +618,28 @@ var AFTER = {
     $('#sg_find').addEventListener('keydown', function (e) { if (e.key === 'Enter') findCode(null); });
     loadCodes(store.get('codes') || []);
   },
+  notices: function () {
+    var q = $('#nt_q');
+    q.addEventListener('input', function () { S.ntQ = q.value; renderNotices(); });
+    if (noticeList()) renderNotices();
+    var before = JSON.stringify(noticeList());
+    loadNotices(!!S.notices).then(function (r) {
+      if (stack[stack.length - 1] !== 'notices' || JSON.stringify(r.list) === before) return;
+      renderNotices();
+    }).catch(function (e) { var b = $('#ntList'); if (b && !noticeList()) b.innerHTML = '<div class="card">' + oops(e.message) + '</div>'; });
+  },
+  notice: function () {
+    var id = S.ntId, n = findNotice(id);
+    if (n) markNoticeSeen(id);
+    if (n && n.content !== undefined) return;
+    // 홈의 '놓치지 마세요'에서 바로 왔으면 제목·마감부터 보여 주고 내용은 뒤에서 받는다
+    loadNotices(true).then(function () {
+      if (stack[stack.length - 1] !== 'notice' || S.ntId !== id) return;
+      var m = findNotice(id), b = $('#ntBody');
+      if (!m || m.content === undefined || (m.link && !$('#app .bottom'))) { noGhost = true; return go('notice', false); }
+      if (b) { b.innerHTML = m.content ? '<div class="nt-body">' + linkify(m.content) + '</div>' : ''; b.classList.add('pane-in'); }
+    }).catch(function (e) { var b = $('#ntBody'); if (b) b.innerHTML = '<div class="card">' + oops(e.message) + '</div>'; });
+  },
   links: function () {
     (S.links ? Promise.resolve(S.links) : call('links')).then(function (g) {
       S.links = g;
@@ -482,6 +673,8 @@ function refreshHome() {
       if (a && b && a.textContent !== b.textContent) a.textContent = b.textContent;
     });
     var box = $('#myBox'); if (box) { var html = myBox(); if (box.innerHTML !== html) { box.innerHTML = html; box.classList.add('pane-in'); } }
+    var fab = $('#nfab'); if (fab) { var fh = noticeFab(); if (fab.outerHTML !== fh) fab.outerHTML = fh; }
+    var nb = $('#ntBox'); if (nb) { var nh = noticeStrip(); if (nb.innerHTML !== nh) { nb.innerHTML = nh; nb.classList.add('pane-in'); } }
     var f = $('#homeFoot'); if (f) f.textContent = ORG;
   }).catch(function () { });
 }
@@ -787,7 +980,7 @@ function renderDay() {
   btn.textContent = !S.group ? '몇 명이 쓰는지 골라 주세요' : g ? hh(g.start) + '~' + hh(g.end) + ' · ' + (g.end - g.start) + '시간 예약' : '시간을 골라 주세요';
 }
 function pickHour(h) {
-  if (!S.group) { toast('먼저 몇 명이 쓰는지 골라 주세요'); var gs = $('#groupSeg'); if (gs) gs.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  if (!S.group) { toast('먼저 몇 명이 쓰는지 골라 주세요'); var gs = $('#groupSeg'); if (gs) gs.scrollIntoView({ behavior: reduceMotion() ? 'auto' : 'smooth', block: 'center' }); return; }
   var g = S.range, t = takenMap(S.day), mx = maxHours();
   var single = { start: h, end: h + 1 };
   if (!g) S.range = single;
@@ -950,7 +1143,7 @@ function linksHtml(g) {
 var HELP_OF = { login: 'account', signup: 'account', forgot: 'account', forgotSent: 'account', reset: 'account', resetDone: 'account', profile: 'account', home: 'start',
   rent: 'rent', pick: 'rent', rented: 'rent', mine: 'rent', returned: 'rent',
   room: 'room', roomForm: 'room', roomDone: 'room', roomMine: 'room', checkout: 'room', checkedOut: 'room',
-  suggest: 'suggest', sgDone: 'suggest', sgMine: 'suggest', links: 'links' };
+  suggest: 'suggest', sgDone: 'suggest', sgMine: 'suggest', links: 'links', notices: 'notices', notice: 'notices' };
 function helpSections() {
   var h = S.home || {}, n = function (v, d) { return v != null && v !== '' ? v : d; };
   var days = n(h.rentDays, 7), maxP = n(h.maxPerPerson, 3), loc = h.location || '보관 장소';
@@ -959,10 +1152,17 @@ function helpSections() {
   var room = h.roomName || '북악관 1005호';
   return [
     { key: 'start', title: '바탕화면은 어떤 곳인가요?', html:
-      '<p>교육학과 학우를 위한 한 화면이에요. 과방·강의실에 붙은 QR 하나로 네 가지를 할 수 있어요.</p>' +
-      '<ul><li><b>물품대여</b> 전공서적·복지물품 빌리고 반납하기</li><li><b>강의실 예약</b> ' + esc(room) + ' 시간 단위 예약</li>' +
+      '<p>교육학과 학우를 위한 한 화면이에요. 과방·강의실에 붙은 QR 하나로 다섯 가지를 할 수 있어요.</p>' +
+      '<ul><li><b>공지</b> 학과 공지를 마감 순서로 한눈에 보기</li><li><b>물품대여</b> 전공서적·복지물품 빌리고 반납하기</li><li><b>강의실 예약</b> ' + esc(room) + ' 시간 단위 예약</li>' +
       '<li><b>건의</b> 학생회에 건의하기(익명 가능)</li><li><b>혜택</b> 학교 시스템·대학생 혜택 바로가기</li></ul>' +
       '<div class="tip">물품대여는 학생회비 납부자에게만 보여요. 납부했는데 안 보이면 학생회에 문의해 주세요.</div>' },
+    { key: 'notices', title: '공지', html:
+      '<ol><li>홈 왼쪽 위 <b>공지 동그라미</b>를 눌러요. 빨간 숫자는 아직 안 읽은 공지 수예요.</li>' +
+      '<li>목록에는 <b>제목</b>과 <b>마감</b>만 보여요. 눌러서 마감 기한·대상·자세한 내용을 봐요.</li>' +
+      '<li>위의 찾기 칸과 분류(학사·행사·장학…)로 필요한 공지를 골라 볼 수 있어요.</li></ol>' +
+      '<ul><li><b>중요 공지</b>는 맨 위에, <b>상시 공지</b>는 마감이 없어서 늘 그 아래에 있어요.</li><li><b>진행 중</b>인 공지는 마감이 가까운 순서예요. 오늘 18:00 마감·내일 마감·D-3처럼 표시돼요. 정확한 마감 시각은 공지를 누르면 보여요.</li>' +
+      '<li>마감이 지나면 저절로 <b>마감된 공지</b>로 내려가고, 30일 뒤에 목록에서 사라져요.</li>' +
+      '<li>3일 안에 마감하는 공지는 홈의 <b>놓치지 마세요</b>에도 떠요. 오른쪽 위 공유 버튼으로 친구에게 보낼 수 있어요.</li></ul>' },
     { key: 'rent', title: '물품대여', html:
       '<p><b>빌리기</b></p><ol><li>[빌리기]에서 물품을 골라요. 한 사람이 동시에 ' + maxP + '개까지예요.</li>' +
       '<li><b>물품 상태가 어떤가요?</b> 창에서 물품을 살펴보고 골라요. <b>자리에 없어요</b>나 <b>파손됐어요</b>(어디가 어떻게 파손됐는지 적기)면 그 물품은 빼고 빌리고, 학생회가 확인해요.</li>' +
@@ -995,7 +1195,7 @@ function pad(n) { return (n < 10 ? '0' : '') + n; }
 
 var VIEW_NAME = { home: '홈', rent: '물품대여', pick: '물품 고르기', rented: '대여 완료', mine: '반납 고르기', returned: '반납 완료',
   room: '강의실 예약', roomForm: '예약 정보 입력', roomDone: '예약 완료', roomMine: '내 예약', checkout: '퇴실 사진', checkedOut: '퇴실 완료',
-  suggest: '건의', sgDone: '건의 완료', sgMine: '내 건의', links: '혜택',
+  suggest: '건의', sgDone: '건의 완료', sgMine: '내 건의', links: '혜택', notices: '공지 목록', notice: '공지 내용',
   intro: '인트로', login: '로그인', signup: '회원가입', forgot: '비밀번호 찾기', forgotSent: '재설정 메일 보냄', reset: '비밀번호 다시 정하기', resetDone: '비밀번호 변경 완료', profile: '내 정보' };
 setupHelp(helpSections, function () { return HELP_OF[stack[stack.length - 1]] || 'start'; },
   function () { var v = stack[stack.length - 1]; return (VIEW_NAME[v] || v || '홈') + (v === 'room' && S.day ? ' (' + S.day + ')' : ''); });
@@ -1089,11 +1289,18 @@ function doLogin(btn) {
   if (pw.length !== 6) { toast('비밀번호 6자리를 적어 주세요'); return $('#l_pw').focus(); }
   busy(btn, true);
   rawCall('login', { studentId: sid, password: pw }).then(function (r) {
+    forgetOtherUser(sid);
     store.set('lastSid', sid);
     saveLogin(r.token, r.user, keep);
     S.home = null;
     leaveThen(function () { arrive(r.user.name + '님, 반가워요'); });
   }).catch(function (e) { busy(btn, false); $('#l_pw').value = ''; toast(e.message); });
+}
+/* 이 휴대폰을 앞서 다른 학우가 썼다면, 그 학우의 건의 접수번호·읽은 답변·읽은 공지 표시를 지운다 */
+function forgetOtherUser(sid) {
+  var last = store.get('lastSid');
+  if (!last || last === sid) return;
+  try { ['bth_codes', 'bth_seenAns', 'bth_ntSeen'].forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { }
 }
 /* 지금 화면을 부드럽게 내보낸 뒤 다음 화면으로 */
 function leaveThen(next) {
@@ -1115,6 +1322,7 @@ function doSignup(btn) {
   f.agree = true;
   busy(btn, true);
   rawCall('signup', f).then(function (r) {
+    forgetOtherUser(f.studentId);
     store.set('lastSid', f.studentId);
     saveLogin(r.token, r.user, true);
     S.home = null;

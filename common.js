@@ -119,19 +119,36 @@ function installBackTrap(handler) {
   });
 }
 
-/* 지금 화면을 복사해 위에 얹고 흐리게 내보낸다. 새 화면은 그 아래에서 바로 그려지므로 코드 흐름은 그대로다. */
-function ghostOut(el, back) {
-  if (reduceMotion() || !el || !el.firstElementChild) return;
+/*
+ * 화면 넘김: 휴대폰 앱처럼 '쌓고(push) 걷어 내는(pop)' 방식.
+ *  - push(앞으로): 새 화면이 오른쪽에서 통째로 들어와 덮는다. 지금 화면의 복사본은 아래에서 살짝 왼쪽으로 물러나며 어두워진다.
+ *  - pop(뒤로): 지금 화면의 복사본이 오른쪽으로 빠져나가고, 아래에 이미 그려 둔 이전 화면이 드러난다.
+ * 두 화면이 반투명하게 겹치는 순간이 없다(항상 한 화면이 다른 화면을 불투명하게 덮는다). 새 화면은 아래에서 바로 그려지므로 코드 흐름은 그대로다.
+ * 복사본(.nav-ghost)을 돌려준다. '동작 줄이기' 설정이면 아무것도 하지 않고 null.
+ */
+var NAV_MS = { push: 360, pop: 320 };
+function ghostOut(el, mode) {
   var prev = document.getElementById('navGhost'); if (prev) prev.remove();
+  if (reduceMotion() || !el || !el.firstElementChild) return null;
   var r = el.getBoundingClientRect();
-  var wrap = document.createElement('div'); wrap.id = 'navGhost'; wrap.className = 'nav-ghost' + (back ? ' back' : '');
+  var wrap = document.createElement('div'); wrap.id = 'navGhost'; wrap.className = 'nav-ghost ' + mode;
   wrap.setAttribute('aria-hidden', 'true');
+  var mover = document.createElement('div'); mover.className = 'nav-mover';
   var c = el.cloneNode(true); c.removeAttribute('id');
   Array.prototype.forEach.call(c.querySelectorAll('[id]'), function (x) { x.removeAttribute('id'); });
+  Array.prototype.forEach.call(c.querySelectorAll('.nav-push'), function (x) { x.classList.remove('nav-push'); });
   c.style.cssText = 'position:absolute;margin:0;left:' + r.left + 'px;width:' + r.width + 'px;top:' + r.top + 'px';
-  wrap.appendChild(c); document.body.appendChild(wrap);
-  setTimeout(function () { wrap.remove(); }, 220);
+  mover.appendChild(c); wrap.appendChild(mover); document.body.appendChild(wrap);
+  setTimeout(function () { wrap.remove(); }, NAV_MS[mode] + 80);
+  return wrap;
 }
+/* 아이폰의 '화면 가장자리 밀어서 뒤로'는 브라우저가 스스로 넘김 효과를 보여 준다. 그 직후에는 우리 효과를 겹쳐 틀지 않는다. */
+var edgeSwipeAt = 0;
+document.addEventListener('touchstart', function (e) {
+  var t = e.touches && e.touches[0]; if (!t) return;
+  if (t.clientX < 28 || t.clientX > window.innerWidth - 28) edgeSwipeAt = Date.now();
+}, { passive: true });
+function justEdgeSwiped() { return Date.now() - edgeSwipeAt < 1500; }
 
 /* 화면 안 확인 창 (confirm 대신) */
 function ask(title, desc, okLabel) {
@@ -200,7 +217,11 @@ var I = {
   qr: svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3M21 14v.01M14 21h3M21 18v3h-1"/>'),
   phone: svg('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>', 2.2),
-  list: svg('<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>', 2.2)
+  list: svg('<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>', 2.2),
+  horn: svg('<path d="M4 10v4a1 1 0 0 0 1 1h2.5l7.5 4V5L7.5 9H5a1 1 0 0 0-1 1z"/><path d="M18 9.5a3.5 3.5 0 0 1 0 5"/><path d="M8 15.5l1 4h2.2"/>'),
+  share: svg('<path d="M12 15V4M8 7.5L12 3.5l4 4"/><path d="M6 12.5v6A1.5 1.5 0 0 0 7.5 20h9a1.5 1.5 0 0 0 1.5-1.5v-6"/>'),
+  pin: svg('<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>'),
+  plus: svg('<path d="M12 5v14M5 12h14"/>', 2.4)
 };
 
 /* 타앙이: assets의 TAANG[name] (default, hello, guide, point, surprised, success, thinking, sorry, loading, thanks, book, letter, room) */
