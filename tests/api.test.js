@@ -138,7 +138,8 @@ console.log('\n■ 학과 공지');
     const list = e.ok('notices', { token: stu }).list;
     eq(list.map(n => n.title), ['과방 이용 수칙', '장학금 서류 제출', '수강 정정 안내', '교육학과 MT 참가 신청', '지난 특강 신청']);
     eq(list.map(n => n.closed), [false, false, false, false, true]);
-    eq(list.map(n => n.daysLeft), [null, 0, 2, 10, -3]);
+    eq(list.map(n => n.daysLeft), [-9999, 0, 2, 10, -3]);
+    eq(list.map(n => n.deadline === ''), [true, false, false, false, false], '상시는 deadline이 빈 글자');
   });
   t('마감한 지 30일이 넘은 공지는 학우 화면에서 사라진다(시트에는 남는다)', () => {
     yes(!e.ok('notices', { token: stu }).list.some(n => n.title === '오래전 공지'));
@@ -176,6 +177,41 @@ console.log('\n■ 학과 공지');
     const log = e.rows('관리기록').map(r => r['작업']);
     yes(log.includes('공지 저장') && log.includes('공지 게시·내림') && log.includes('공지 삭제'));
     yes(e.rows('관리기록').every(r => r['처리자'] === '김관리'));
+  });
+  t('상시 공지도 daysLeft가 숫자다(google.script.run은 null 칸을 빼고 보내서 화면에 D-undefined가 떴다)', () => {
+    yes(e.ok('notices', { token: stu }).list.every(n => typeof n.daysLeft === 'number'));
+    yes(e.ok('home', { token: stu }).notices.every(n => typeof n.daysLeft === 'number'));
+  });
+  t('마감 시각을 30분 단위로 정한다: 시트에는 "날짜 시각"으로, 화면에는 시각까지', () => {
+    const id = save({ title: '시각 있는 공지', deadline: e.ymd(3), dueTime: '18:30' }).id;
+    eq(e.rows('공지').filter(r => r['공지ID'] === id)[0]['마감일'], e.ymd(3) + ' 18:30');
+    const n = e.ok('notices', { token: stu }).list.filter(x => x.id === id)[0];
+    eq(n.dueTime, '18:30'); yes(/ 18:30$/.test(n.deadlineLabel), n.deadlineLabel);
+  });
+  t('시각을 안 고르면 그날 23:59', () => {
+    const id = save({ title: '시각 없는 공지', deadline: e.ymd(4) }).id;
+    eq(e.ok('notices', { token: stu }).list.filter(x => x.id === id)[0].dueTime, '23:59');
+  });
+  t('30분 단위가 아닌 시각은 거절한다', () => {
+    err(e.api('adminNoticeSave', { token: at, category: '학사', title: '이상한 시각', deadline: e.ymd(2), dueTime: '18:15' }), /30분/);
+    err(e.api('adminNoticeSave', { token: at, category: '학사', title: '이상한 시각', deadline: e.ymd(2), dueTime: '24:00' }), /30분/);
+  });
+  t('오늘 이미 지난 시각이면 바로 마감, 아직이면 진행 중', () => {
+    const now = new Date(), pad = x => String(x).padStart(2, '0');
+    const past = new Date(now.getTime() - 3600000), fut = new Date(now.getTime() + 3600000);
+    if (past.getDate() !== now.getDate() || fut.getDate() !== now.getDate()) return; // 자정 무렵에는 건너뛴다
+    e.add('공지', { '상태': '게시', '분류': '기타', '제목': '한 시간 전 마감', '마감일': e.ymd(0) + ' ' + pad(past.getHours()) + ':' + pad(past.getMinutes()) });
+    e.add('공지', { '상태': '게시', '분류': '기타', '제목': '한 시간 뒤 마감', '마감일': e.ymd(0) + ' ' + pad(fut.getHours()) + ':' + pad(fut.getMinutes()) });
+    const l = e.ok('notices', { token: stu }).list;
+    eq(l.filter(x => x.title === '한 시간 전 마감')[0].closed, true); eq(l.filter(x => x.title === '한 시간 뒤 마감')[0].closed, false);
+  });
+  t('시트가 날짜로 바꿔 둔 칸도 읽는다(날짜만이면 23:59, 시각이 있으면 그 시각)', () => {
+    const d1 = new Date(); d1.setDate(d1.getDate() + 6); d1.setHours(0, 0, 0, 0);
+    const d2 = new Date(d1.getTime()); d2.setHours(14, 30);
+    e.add('공지', { '상태': '게시', '분류': '기타', '제목': '날짜 칸', '마감일': d1 });
+    e.add('공지', { '상태': '게시', '분류': '기타', '제목': '날짜시각 칸', '마감일': d2 });
+    const l = e.ok('notices', { token: stu }).list;
+    eq(l.filter(x => x.title === '날짜 칸')[0].dueTime, '23:59'); eq(l.filter(x => x.title === '날짜시각 칸')[0].dueTime, '14:30');
   });
   t('제목에 수식을 적어도 글자로 저장된다', () => {
     save({ title: '=HYPERLINK("http://x")', deadline: '' });

@@ -47,6 +47,9 @@ const ok = (c, m) => { if (c) { pass++; console.log('  통과  ' + m); } else { 
     ok(await pg.locator('.nt.closed').count() === 0 && await pg.locator('.nt-more').count() === 1, '마감된 공지는 접혀 있다');
     await shot('04-notices');
     await pg.click('.nt-more'); ok(await pg.locator('.nt.closed').count() === 1, '눌러서 마감된 공지를 펼친다');
+    // 테스트용(Apps Script) 화면은 google.script.run으로 받는데, 이때 값이 null인 칸은 빠져서 온다 → 같은 상황을 만들어 본다
+    const undef = await pg.evaluate(() => { S.notices.list.forEach(n => { if (!n.deadline) delete n.daysLeft; }); renderNotices(); return /undefined|NaN/.test(document.querySelector('#ntList').textContent); });
+    ok(!undef, '마감 없는 공지에 D-undefined가 뜨지 않는다(칸이 빠져 와도 "상시")');
     await pg.fill('#nt_q', '장학'); ok(await pg.locator('.nt').count() === 1 && await pg.evaluate(() => document.activeElement.id === 'nt_q'), '찾기: 글자를 쳐도 입력칸이 유지되고 결과만 바뀐다');
     await pg.fill('#nt_q', '없는말'); ok(/맞는 공지가 없어요/.test(await pg.textContent('#ntList')), '찾는 공지가 없으면 안내와 [전체 공지 보기]');
     await shot('05-search-empty');
@@ -97,10 +100,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  통과  ' + m); } else { 
     await pg.click('#nfSave'); ok(/분류/.test(await pg.textContent('#toast')), '분류를 안 고르면 알려 준다');
     await pg.click('#nfCat button:has-text("모집")'); await pg.fill('#nfTitle', '학생회 집행부원 모집');
     const d = await pg.evaluate(() => { const x = new Date(); x.setDate(x.getDate() + 1); return x.getFullYear() + '-' + ('0' + (x.getMonth() + 1)).slice(-2) + '-' + ('0' + x.getDate()).slice(-2); });
-    await pg.fill('#nfDead', d); ok(/1일 뒤/.test(await pg.textContent('#nfDeadHint')), '마감일을 고르면 언제 내려가는지 알려 준다');
+    ok(await pg.$eval('#nfTime', s => s.disabled && s.options.length === 49 && s.value === '23:59'), '마감 시각은 30분 단위 48칸 + 23:59, 날짜를 고르기 전에는 잠겨 있다');
+    await pg.fill('#nfDead', d); await pg.selectOption('#nfTime', '18:30');
+    ok(/내일 18:30에 마감/.test(await pg.textContent('#nfDeadHint')), '날짜·시각을 고르면 언제 내려가는지 알려 준다');
     await pg.fill('#nfBody', '함께할 집행부원을 찾아요.'); await pg.click('#nfSave'); await pg.waitForFunction(() => !document.querySelector('#nfTitle'));
     await pg.waitForFunction(() => document.querySelectorAll('#pane .rc').length === 7);
-    ok(true, '공지를 올리면 목록에 바로 보인다');
+    ok(/18:30까지/.test(await pg.textContent('#pane .rc:has-text("집행부원")')), '공지를 올리면 목록에 바로 보이고, 마감 시각까지 나온다');
     await pg.click('#pane .rc:has-text("집행부원") button:has-text("내리기")'); await pg.click('.overlay .btn.primary'); await pg.waitForFunction(() => document.querySelectorAll('#pane .rc').length === 6);
     await pg.click('.stat:has-text("내린 공지")'); ok(await pg.locator('#pane .rc').count() === 1, '내린 공지는 [내린 공지]로 간다');
     await pg.click('#pane button:has-text("다시 게시")'); await pg.waitForFunction(() => /없어요/.test(document.querySelector('#pane').textContent));

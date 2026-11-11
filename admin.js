@@ -79,7 +79,7 @@ var SECTIONS = {
   /* ───────── 공지: 쓰기 · 고치기 · 내리기 ───────── */
   notices: function (d) {
     var N = d.notices || { live: [], closed: [], hidden: [] }, tab = N[A.tab.notices] ? A.tab.notices : 'live';
-    var soon = N.live.filter(function (n) { return n.daysLeft !== null && n.daysLeft <= 3; }).length;
+    var soon = N.live.filter(function (n) { return n.deadline && n.daysLeft <= 3; }).length;
     var list = N[tab];
     var emptyMsg = { live: '진행 중인 공지가 없어요. [새 공지 쓰기]로 올려 보세요', closed: '마감된 공지가 없어요', hidden: '내린 공지가 없어요' }[tab];
     return '<button class="btn primary" style="margin-top:14px" onclick="openNoticeForm()">' + I.plus.replace('<svg', '<svg width="20" height="20"') + ' 새 공지 쓰기</button>' +
@@ -451,8 +451,8 @@ function openMemo(itemId) {
 function ntChip(n) {
   if (n.hidden) return '<span class="chip mute">내림</span>';
   if (n.closed) return '<span class="chip mute">마감</span>';
-  if (n.daysLeft === null) return '<span class="chip ok">상시</span>';
-  if (n.daysLeft === 0) return '<span class="chip bad">오늘 마감</span>';
+  if (!n.deadline) return '<span class="chip ok">상시</span>'; // 마감이 없으면 daysLeft가 비어 올 수 있다
+  if (n.daysLeft <= 0) return '<span class="chip bad">오늘 ' + (n.dueTime && n.dueTime !== '23:59' ? n.dueTime + ' ' : '') + '마감</span>';
   return '<span class="chip ' + (n.daysLeft <= 3 ? 'warn' : 'mute') + '">D-' + n.daysLeft + '</span>';
 }
 function noticeCard(n, tab) {
@@ -462,7 +462,7 @@ function noticeCard(n, tab) {
     : '<button class="btn line" onclick="setNoticeStatus(\'' + id + '\',\'내림\',this)">내리기</button><button class="btn line" onclick="openNoticeForm(\'' + id + '\')">고치기</button>';
   return '<div class="rc"><div class="row"><span class="chip mute">' + esc(n.category) + '</span>' + (n.important ? '<span class="chip g">중요</span>' : '') + '<span class="grow"></span>' + ntChip(n) + '</div>' +
     '<div class="nm" style="white-space:normal;margin-top:8px">' + esc(n.title) + '</div>' +
-    '<div class="who">' + (n.deadline ? '마감 ' + esc(n.deadlineLabel) : '마감 없음') + ' · 대상 ' + esc(n.target || '교육학과 학우') + '</div>' +
+    '<div class="who">' + (n.deadline ? '마감 ' + esc(n.deadlineLabel) + '까지' : '마감 없음') + ' · 대상 ' + esc(n.target || '교육학과 학우') + '</div>' +
     '<div class="who">' + (n.atLabel ? esc(n.atLabel) + ' 올림' : '시트에서 추가') + (n.author ? ' · ' + esc(n.author) : '') + (n.link ? ' · 링크 있음' : '') + '</div>' +
     (n.content ? '<div class="quote" style="white-space:pre-wrap;max-height:4.9em;overflow:hidden">' + esc(n.content.slice(0, 160)) + (n.content.length > 160 ? '…' : '') + '</div>' : '') +
     '<div class="acts">' + acts + '</div></div>';
@@ -472,12 +472,23 @@ function findAdminNotice(id) {
   return [].concat(N.live || [], N.closed || [], N.hidden || []).filter(function (n) { return n.id === id; })[0] || null;
 }
 function applyNotices(r) { if (r && r.notices) { A.data.notices = r.notices; var y = window.scrollY; render(); window.scrollTo(0, y); } }
+/* 마감 시각: 30분 단위(00:00~23:30)와 하루 끝(23:59) */
+function timeOptions(cur) {
+  var out = [], pad = function (x) { return (x < 10 ? '0' : '') + x; };
+  for (var h = 0; h < 24; h++) [0, 30].forEach(function (mi) { out.push(pad(h) + ':' + pad(mi)); });
+  out.push('23:59');
+  if (out.indexOf(cur) < 0) cur = '23:59';
+  return out.map(function (t) {
+    var h = Number(t.slice(0, 2)), label = t === '23:59' ? '23:59 (그날 끝)' : (h < 12 ? '오전 ' : '오후 ') + ((h % 12) || 12) + ':' + t.slice(3);
+    return '<option value="' + t + '"' + (t === cur ? ' selected' : '') + '>' + label + '</option>';
+  }).join('');
+}
 /* 공지 쓰기·고치기 창. 쓰던 글은 창을 닫아도 이 화면에 있는 동안 남는다(새 공지일 때) */
 function openNoticeForm(id) {
   var n = id ? findAdminNotice(id) : null;
   if (id && !n) return toast('공지를 찾을 수 없어요. 새로고침해 주세요');
-  var v = n ? { category: n.category, title: n.title, content: n.content || '', target: n.target || '', deadline: n.deadline || '', link: n.link || '', important: !!n.important }
-    : (A.ntDraft || { category: '', title: '', content: '', target: '전체 학우', deadline: '', link: '', important: false });
+  var v = n ? { category: n.category, title: n.title, content: n.content || '', target: n.target || '', deadline: n.deadline || '', dueTime: n.dueTime || '23:59', link: n.link || '', important: !!n.important }
+    : (A.ntDraft || { category: '', title: '', content: '', target: '전체 학우', deadline: '', dueTime: '23:59', link: '', important: false });
   var cats = A.data.noticeCategories || ['학사', '행사', '장학', '모집', '학생회', '기타'];
   var today = new Date(), min = today.getFullYear() + '-' + ('0' + (today.getMonth() + 1)).slice(-2) + '-' + ('0' + today.getDate()).slice(-2);
   var m = document.createElement('div'); m.className = 'overlay sheet-up nt-form';
@@ -485,8 +496,9 @@ function openNoticeForm(id) {
     '<button class="icon-btn" aria-label="닫기" data-x>' + I.close + '</button></div>' +
     '<div class="field" style="margin-top:14px"><span>분류</span><div class="pick-row" id="nfCat">' + cats.map(function (c) { return '<button type="button" class="' + (v.category === c ? 'on' : '') + '" data-c="' + esc(c) + '" aria-pressed="' + (v.category === c) + '">' + esc(c) + '</button>'; }).join('') + '</div></div>' +
     '<label class="field"><span>제목 · 목록에는 제목만 보여요</span><input id="nfTitle" maxlength="60" placeholder="예: 가을 MT 참가 신청" value="' + esc(v.title) + '"></label>' +
-    '<div class="field"><label for="nfDead"><span>마감일 · 그날 23:59까지 진행 중으로 보여요</span></label><div class="mail-row"><input id="nfDead" type="date" min="' + (n ? '' : min) + '" value="' + esc(v.deadline) + '">' +
-    '<button type="button" class="btn sm soft" id="nfAlways">상시(마감 없음)</button></div><p class="hint" id="nfDeadHint" style="margin:6px 4px 0"></p></div>' +
+    '<div class="field"><label for="nfDead"><span>마감 날짜와 시각 · 그 시각까지 진행 중으로 보여요</span></label><div class="due-row"><input id="nfDead" type="date" min="' + (n ? '' : min) + '" value="' + esc(v.deadline) + '" aria-label="마감 날짜">' +
+    '<select id="nfTime" aria-label="마감 시각">' + timeOptions(v.dueTime) + '</select></div>' +
+    '<div class="row" style="margin-top:8px;gap:8px"><p class="hint grow" id="nfDeadHint" style="margin:0 4px"></p><button type="button" class="btn sm soft" id="nfAlways">상시(마감 없음)</button></div></div>' +
     '<label class="field"><span>대상</span><input id="nfTarget" maxlength="40" placeholder="예: 전체 학우, 24학번, 1~2학년" value="' + esc(v.target) + '"></label>' +
     '<label class="field"><span>자세한 내용</span><textarea id="nfBody" maxlength="3000" style="min-height:150px" placeholder="일시·장소·준비물·문의처처럼 학우가 알아야 할 것을 적어 주세요. 주소(https://…)는 누를 수 있게 바뀌어요">' + esc(v.content) + '</textarea></label>' +
     '<label class="field"><span>신청·안내 링크 (선택)</span><input id="nfLink" type="url" inputmode="url" maxlength="300" placeholder="https://forms.gle/…" value="' + esc(v.link) + '"></label>' +
@@ -495,16 +507,20 @@ function openNoticeForm(id) {
   var read = function () {
     var on = m.querySelector('#nfCat .on');
     return { category: on ? on.dataset.c : '', title: $('#nfTitle', m).value.trim(), content: $('#nfBody', m).value.trim(), target: $('#nfTarget', m).value.trim(),
-      deadline: $('#nfDead', m).value, link: $('#nfLink', m).value.trim(), important: $('#nfImp', m).classList.contains('on') };
+      deadline: $('#nfDead', m).value, dueTime: $('#nfTime', m).value, link: $('#nfLink', m).value.trim(), important: $('#nfImp', m).classList.contains('on') };
   };
   var hint = function () {
-    var d = $('#nfDead', m).value, h = $('#nfDeadHint', m);
-    if (!d) { h.textContent = '마감일이 없어요 → [상시 공지]로 늘 위쪽에 있어요'; return; }
+    var d = $('#nfDead', m).value, h = $('#nfDeadHint', m), sel = $('#nfTime', m), tm = sel.value;
+    sel.disabled = !d;
+    if (!d) { h.textContent = '마감이 없어요 → [상시 공지]로 늘 위쪽에 있어요'; return; }
     var left = Math.round((new Date(d + 'T12:00:00') - new Date(min + 'T12:00:00')) / 86400000);
-    h.textContent = left < 0 ? '이미 지난 날짜예요 → 바로 [마감된 공지]로 보여요' : left === 0 ? '오늘 23:59에 마감돼요' : left + '일 뒤 23:59에 마감되고, 저절로 [마감된 공지]로 내려가요';
+    var past = new Date(d + 'T' + tm + ':59').getTime() < Date.now();
+    var when = left === 0 ? '오늘 ' + tm : left === 1 ? '내일 ' + tm : Number(d.slice(5, 7)) + '월 ' + Number(d.slice(8)) + '일 ' + tm;
+    h.textContent = past ? '이미 지난 시각이에요 → 바로 [마감된 공지]로 보여요' : when + '에 마감되고, 저절로 [마감된 공지]로 내려가요';
   };
   hint();
   m.addEventListener('input', function () { hint(); if (!n) A.ntDraft = read(); });
+  m.addEventListener('change', function () { hint(); if (!n) A.ntDraft = read(); });
   m.onclick = function (e) {
     if (e.target === m || e.target.closest('[data-x]')) return closeOverlay(m);
     var c = e.target.closest('#nfCat button');
@@ -687,7 +703,7 @@ function adminHelp() {
       '<ul><li>한도가 모자라면 앱이 멈추지 않고 그 메일만 건너뛰어요. 이 화면 위에 몇 통을 못 보냈는지 나와요.</li>' +
       '<li>아끼려면 시트 [설정]의 <b>관리자 즉시 알림</b>을 <b>사용 안 함</b>으로 바꿔요.</li></ul>' },
     { key: 'notices', title: '공지', html: '<ul><li><b>새 공지 쓰기</b>: 분류·제목·마감일·대상·자세한 내용·링크를 적어 올려요. 학우 목록에는 <b>제목과 마감</b>만 보이고, 누르면 나머지가 보여요.</li>' +
-      '<li><b>마감일</b>이 지나면 저절로 [마감]으로 내려가요. 30일 뒤에는 학우 화면에서 사라지고 시트에는 남아요.</li>' +
+      '<li><b>마감 날짜와 시각</b>(30분 단위, 기본은 그날 23:59)이 지나면 저절로 [마감]으로 내려가요. 30일 뒤에는 학우 화면에서 사라지고 시트에는 남아요.</li>' +
       '<li>마감일을 비우면(<b>상시</b>) 늘 위쪽에 고정돼요. 과방 수칙처럼 계속 보여야 하는 안내에 써요.</li>' +
       '<li><b>중요</b>로 올리면 목록 맨 위에 올라가고 학우 홈의 [놓치지 마세요]에 보여요. 3일 안에 마감하는 공지도 거기에 보여요.</li>' +
       '<li><b>내리기</b>는 학우 화면에서만 숨겨요(다시 게시 가능). <b>지우기</b>는 시트에서 줄을 지워요.</li>' +

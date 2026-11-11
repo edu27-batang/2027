@@ -1759,17 +1759,40 @@ function readNotices_(t) {
   if (!t && (!sh || sh.getLastRow() < 2)) return [];
   t = t || table_(SHEET.NOTICES);
   return t.rows.map(function (o) {
-    var dl = ymdOf_(o['마감일']);
+    var dl = parseDeadline_(o['마감일']);
     return { row: o.row, id: String(o['공지ID']).trim(), status: String(o['상태']).trim() === NOTICE_STATUS.OFF ? NOTICE_STATUS.OFF : NOTICE_STATUS.ON,
       category: NOTICE_CATEGORIES.indexOf(String(o['분류']).trim()) >= 0 ? String(o['분류']).trim() : '기타',
       title: String(o['제목']).trim(), content: String(o['내용'] || '').replace(/\r/g, ''), target: String(o['대상'] || '').trim(),
-      deadline: /^\d{4}-\d{2}-\d{2}$/.test(dl) ? dl : '', link: safeUrl_(o['링크']),
+      deadline: dl.date, dueTime: dl.time, link: safeUrl_(o['링크']),
       important: /^(중요|예|y|yes|true|1|o)$/i.test(String(o['중요']).trim()),
       at: toDate_(o['등록일시']), editedAt: toDate_(o['수정일시']), author: String(o['작성자'] || '') };
   }).filter(function (n) { return n.title; }).map(function (n) {
     if (!n.id) n.id = 'ROW' + n.row; // 시트에서 손으로 추가한 줄: 줄 번호로 구분(관리자 화면에서 한 번 저장하면 공지ID가 붙는다)
     return n;
   });
+}
+/**
+ * [공지] 마감일 칸: '2026-11-30'(그날 23:59) 또는 '2026-11-30 18:00'(그 시각). 시트가 날짜로 바꿔 둔 값도 읽는다.
+ * → {date:'yyyy-MM-dd'|'', time:'HH:mm'}
+ */
+var NOTICE_DEFAULT_TIME_ = '23:59';
+function parseDeadline_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
+    var hm = Utilities.formatDate(v, 'Asia/Seoul', 'HH:mm');
+    return { date: ymd_(v), time: hm === '00:00' ? NOTICE_DEFAULT_TIME_ : hm }; // 날짜만 적은 칸은 자정(00:00)으로 읽힌다 → 그날 끝까지
+  }
+  var m = /^(\d{4}-\d{2}-\d{2})(?:[ T]+(\d{1,2}):(\d{2}))?$/.exec(String(v || '').trim());
+  if (!m) return { date: '', time: '' };
+  var h = m[2] == null ? null : Number(m[2]), mi = m[3] == null ? null : Number(m[3]);
+  var time = h === null || h > 23 || mi > 59 ? NOTICE_DEFAULT_TIME_ : pad2_(h) + ':' + pad2_(mi);
+  return { date: m[1], time: time };
+}
+/** 마감 시각(Date). 그 '분'이 끝날 때까지는 진행 중으로 본다 */
+function deadlineAt_(n) {
+  if (!n.deadline) return null;
+  var t = n.dueTime.split(':').map(Number), d = dateAt_(n.deadline, 0);
+  d.setHours(t[0], t[1], 59, 999);
+  return d;
 }
 function safeUrl_(v) { var u = String(v || '').trim(); return /^https?:\/\/[^\s<>"']+$/i.test(u) ? u : ''; }
 function noticeDaysLeft_(n, today) {
@@ -1778,8 +1801,11 @@ function noticeDaysLeft_(n, today) {
 }
 function publicNotice_(n, today, full) {
   var left = noticeDaysLeft_(n, today);
-  var x = { id: n.id, category: n.category, title: n.title, target: n.target, deadline: n.deadline,
-    deadlineLabel: n.deadline ? fmtYmd_(n.deadline) : '', daysLeft: left, closed: left !== null && left < 0,
+  var at = deadlineAt_(n);
+  // 마감이 없으면 daysLeft는 -1이 아니라 '없음'이다. 화면은 deadline(빈 글자)로 상시를 가린다(google.script.run은 null 칸을 빼고 보낸다)
+  var x = { id: n.id, category: n.category, title: n.title, target: n.target, deadline: n.deadline, dueTime: n.dueTime || '',
+    deadlineLabel: n.deadline ? fmtYmd_(n.deadline) + ' ' + n.dueTime : '', dateLabel: n.deadline ? fmtYmd_(n.deadline) : '',
+    dueAt: at ? at.getTime() : 0, daysLeft: left === null ? -9999 : left, closed: !!at && new Date().getTime() > at.getTime(),
     important: n.important, at: n.at ? Utilities.formatDate(n.at, 'Asia/Seoul', 'yyyy-MM-dd') : '', atLabel: n.at ? fmtDate_(n.at) : '' };
   if (full) { x.content = n.content; x.link = n.link; x.edited = !!(n.editedAt && n.at && n.editedAt.getTime() - n.at.getTime() > 60000); }
   return x;
@@ -1788,10 +1814,10 @@ function publicNotice_(n, today, full) {
 function sortNotices_(list) {
   return list.sort(function (a, b) {
     if (a.closed !== b.closed) return a.closed ? 1 : -1;
-    if (a.closed) return b.deadline.localeCompare(a.deadline);
+    if (a.closed) return b.dueAt - a.dueAt;
     if (a.important !== b.important) return a.important ? -1 : 1;
     if (!a.deadline !== !b.deadline) return a.deadline ? 1 : -1;
-    if (a.deadline !== b.deadline) return a.deadline.localeCompare(b.deadline);
+    if (a.dueAt !== b.dueAt) return a.dueAt - b.dueAt;
     return String(b.at).localeCompare(String(a.at));
   });
 }
@@ -1799,7 +1825,7 @@ function visibleNotices_(full) {
   var today = ymd_(new Date());
   return sortNotices_(readNotices_().filter(function (n) { return n.status === NOTICE_STATUS.ON; })
     .map(function (n) { return publicNotice_(n, today, full); })
-    .filter(function (x) { return !x.closed || x.daysLeft >= -NOTICE_KEEP_DAYS_; }));
+    .filter(function (x) { return !x.closed || !x.deadline || x.daysLeft >= -NOTICE_KEEP_DAYS_; }));
 }
 /** 홈에 싣는 요약: 진행 중인 공지의 제목·마감만(읽지 않은 수와 '곧 마감' 표시용) */
 function noticeBrief_() {
@@ -1835,10 +1861,12 @@ function cleanNotice_(p) {
   var deadline = String(p.deadline || '').trim();
   if (deadline && !/^\d{4}-\d{2}-\d{2}$/.test(deadline)) throw userError_('마감일을 다시 골라 주세요.');
   if (deadline && ymd_(dateAt_(deadline, 12)) !== deadline) throw userError_('없는 날짜예요. 마감일을 다시 골라 주세요.');
+  var time = String(p.dueTime || NOTICE_DEFAULT_TIME_).trim();
+  if (deadline && !/^(?:[01]\d|2[0-3]):(?:00|30)$|^23:59$/.test(time)) throw userError_('마감 시각을 다시 골라 주세요(30분 단위).');
   var link = String(p.link || '').trim();
   if (link && !safeUrl_(link)) throw userError_('링크는 https:// 로 시작하는 주소를 적어 주세요.');
   return { '분류': category, '제목': title, '내용': content, '대상': String(p.target || '').replace(/\s+/g, ' ').trim().slice(0, 40),
-    '마감일': deadline, '링크': link, '중요': p.important ? '중요' : '' };
+    '마감일': deadline ? deadline + ' ' + time : '', '링크': link, '중요': p.important ? '중요' : '' };
 }
 /** payload: {token, id?, category, title, content, target, deadline, link, important} — id가 없으면 새 공지 */
 function apiAdminNoticeSave_(p) {
@@ -2124,7 +2152,7 @@ function setup() {
   listRule_(nt, '상태', [NOTICE_STATUS.ON, NOTICE_STATUS.OFF]);
   listRule_(nt, '분류', NOTICE_CATEGORIES);
   statusColors_(nt, '상태', { '게시': 'good', '내림': 'mute' });
-  note_(nt, '마감일', '2026-11-30처럼 적어요. 그날 23:59까지 진행 중으로 보이고, 지나면 저절로 [마감된 공지]로 내려가요. 비워 두면 [상시] 공지로 위쪽에 고정돼요.');
+  note_(nt, '마감일', '2026-11-30 18:00처럼 적어요(시각을 빼면 그날 23:59). 그 시각까지 진행 중으로 보이고, 지나면 저절로 [마감된 공지]로 내려가요. 비워 두면 [상시] 공지로 위쪽에 고정돼요.');
   note_(nt, '중요', '「중요」라고 적으면 목록 맨 위에 올라가고 홈에도 보여요.');
   note_(nt, '링크', 'https:// 로 시작하는 신청 폼·안내 주소(선택).');
   width_(nt, '제목', 260); width_(nt, '내용', 420); width_(nt, '링크', 240);

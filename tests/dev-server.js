@@ -20,7 +20,7 @@ function seed() {
   const at = e.ok('adminLogin', { studentId: '20260001', password: '123456' }).token;
   const n = o => e.ok('adminNoticeSave', Object.assign({ token: at, target: '전체 학우' }, o));
   n({ category: '장학', title: '2학기 교육학과 성적우수 장학금 서류 제출', deadline: e.ymd(0), content: '성적우수 장학금 대상자는 아래 서류를 학과 사무실로 제출해 주세요.\n\n1. 장학금 신청서\n2. 성적증명서\n3. 통장 사본\n\n문의: 학과 사무실 02-910-0000', link: 'https://www.kookmin.ac.kr/' });
-  n({ category: '행사', title: '교육학과 가을 MT 참가 신청', deadline: e.ymd(2), target: '1~3학년', important: true, content: '11월 넷째 주 금~토, 가평에서 진행해요.\n참가비 3만 원(학생회비 납부자 2만 원).\n\n신청 폼: https://forms.gle/example' });
+  n({ category: '행사', title: '교육학과 가을 MT 참가 신청', deadline: e.ymd(2), dueTime: '18:00', target: '1~3학년', important: true, content: '11월 넷째 주 금~토, 가평에서 진행해요.\n참가비 3만 원(학생회비 납부자 2만 원).\n\n신청 폼: https://forms.gle/example' });
   n({ category: '학사', title: '2027학년도 1학기 복수전공·부전공 신청 안내', deadline: e.ymd(9), content: '신청 기간 안에 종합정보시스템에서 신청해 주세요.' });
   n({ category: '모집', title: '교육봉사 동아리 겨울 활동 참가자 모집', deadline: e.ymd(16), target: '24·25학번', content: '겨울방학 동안 지역아동센터에서 학습 지도 봉사를 해요.' });
   n({ category: '학생회', title: '과방 이용 수칙', deadline: '', content: '1. 쓴 자리는 정리해요.\n2. 음식물은 지정된 통에 버려요.\n3. 밤 10시 이후에는 소등해요.' });
